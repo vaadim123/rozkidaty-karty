@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Поділ сум по картах</title>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a21; --line:#262b35;
+    --ink:#eef1f6; --muted:#8b94a7;
+    --accent:#16b8a6; --accent-press:#0e9385;
+    --ok:#3ddc97; --err:#ff6b6b; --field:#0e121a;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; min-height:100vh; background:var(--bg); color:var(--ink);
+    font-family:"Segoe UI",system-ui,-apple-system,sans-serif;
+    display:flex; align-items:center; justify-content:center; padding:24px;
+  }
+  .card{
+    width:100%; max-width:660px; background:var(--panel);
+    border:1px solid var(--line); border-radius:18px; padding:32px;
+    box-shadow:0 24px 60px rgba(0,0,0,.45);
+  }
+  h1{margin:0 0 6px; font-size:28px; letter-spacing:-.4px}
+  .sub{margin:0 0 22px; color:var(--muted); font-size:14px; line-height:1.5}
+  label{display:block; font-size:13px; color:var(--muted); margin:14px 0 6px}
+  input{
+    width:100%; background:var(--field); border:1px solid var(--line); color:var(--ink);
+    border-radius:10px; padding:12px 14px; font-size:14px; outline:none;
+  }
+  input:focus{border-color:var(--accent)}
+  button{
+    width:100%; margin-top:22px; border:0; cursor:pointer; color:#04201d;
+    background:var(--accent); font-weight:700; font-size:18px;
+    padding:17px; border-radius:12px; transition:.15s transform,.15s background;
+  }
+  button:hover{background:var(--accent-press)}
+  button:active{transform:translateY(1px)}
+  button:disabled{opacity:.55; cursor:not-allowed}
+  .status{margin-top:18px; font-size:14px; min-height:20px; line-height:1.5}
+  .status.ok{color:var(--ok)} .status.err{color:var(--err)}
+  .grid{display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:18px}
+  .stat{background:var(--field); border:1px solid var(--line); border-radius:11px; padding:13px 15px}
+  .stat .n{font-size:22px; font-weight:700} .stat .l{font-size:12px; color:var(--muted); margin-top:2px}
+  pre{
+    margin-top:16px; background:#0b0d12; border:1px solid var(--line); border-radius:11px;
+    padding:14px; white-space:pre-wrap; word-break:break-word; font-size:12.5px;
+    color:#c7cedb; max-height:260px; overflow:auto;
+  }
+  .spin{display:inline-block; width:15px; height:15px; border:2px solid #04201d40;
+    border-top-color:#04201d; border-radius:50%; animation:s .7s linear infinite; vertical-align:-2px; margin-right:8px}
+  @keyframes s{to{transform:rotate(360deg)}}
+  details{margin-top:14px; font-size:13px; color:var(--muted)}
+  summary{cursor:pointer}
+</style>
+</head>
+<body>
+  <main class="card">
+    <h1>Поділ сум по картах</h1>
+    <p class="sub">Розкидає суми партнерів по картах зарплат у Google&nbsp;Таблиці.
+       Кожен партнер платить на одну карту, великий — максимум на дві.</p>
+
+    <label for="client">Google OAuth Client ID</label>
+    <input id="client" placeholder="1234567890-xxxx.apps.googleusercontent.com">
+
+    <label for="url">Посилання на таблицю</label>
+    <input id="url" placeholder="https://docs.google.com/spreadsheets/d/...">
+
+    <button id="run">Увійти через Google і запустити поділ</button>
+
+    <div id="status" class="status"></div>
+
+    <div id="stats" class="grid" hidden>
+      <div class="stat"><div class="n" id="s_partners">—</div><div class="l">Партнерів</div></div>
+      <div class="stat"><div class="n" id="s_cards">—</div><div class="l">Карт</div></div>
+      <div class="stat"><div class="n" id="s_maxcards">—</div><div class="l">Макс. карт на партнера</div></div>
+      <div class="stat"><div class="n" id="s_balance">—</div><div class="l">Партнерів із залишком</div></div>
+    </div>
+
+    <pre id="log" hidden></pre>
+
+    <details>
+      <summary>Як налаштувати (один раз)</summary>
+      <p>1. Google Cloud Console → APIs &amp; Services → <b>Enable</b> «Google Sheets API».<br>
+         2. Credentials → Create credentials → <b>OAuth client ID</b> → тип <b>Web application</b>.<br>
+         3. У «Authorized JavaScript origins» додай <code>https://vaadim123.github.io</code>.<br>
+         4. Скопіюй <b>Client ID</b> у поле вище (зберігається в браузері).<br>
+         5. Таблицю має бути доступно твоєму Google-акаунту на редагування.</p>
+    </details>
+  </main>
+
+<script>
+const SCOPE = "https://www.googleapis.com/auth/spreadsheets";
+const DEFAULT_URL = "https://docs.google.com/spreadsheets/d/1WER4lgVgsS4r-KuTiaai0EOJalc-WZbeYl4EoK0yi0M";
+const SHEET = "Розкидати карти";
+
+const $ = id => document.getElementById(id);
+const clientEl = $("client"), urlEl = $("url"), btn = $("run"), status = $("status");
+
+clientEl.value = localStorage.getItem("gclient") || "";
+urlEl.value = localStorage.getItem("gurl") || DEFAULT_URL;
+clientEl.oninput = () => localStorage.setItem("gclient", clientEl.value.trim());
+urlEl.oninput = () => localStorage.setItem("gurl", urlEl.value.trim());
+
+let tokenClient = null, accessToken = null, SID = null;
+
+function colLetter(n){let s="";while(n>0){let r=(n-1)%26;s=String.fromCharCode(65+r)+s;n=Math.floor((n-1)/26);}return s;}
+function tryFloat(x){const c=String(x??"").replace(/ /g,"").replace(/\s/g,"").trim();const n=Number(c);return isNaN(n)?0:n;}
+function q(range){return `'${SHEET}'!${range}`;}
+function pad2(n){return String(n).padStart(2,"0");}
+function nowStr(){const d=new Date();return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;}
+
+async function api(method, path, body){
+  const r = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SID}${path}`,{
+    method, headers:{Authorization:`Bearer ${accessToken}`,"Content-Type":"application/json"},
+    body: body ? JSON.stringify(body) : undefined
+  });
+  if(!r.ok) throw new Error(`Sheets API ${r.status}: ${await r.text()}`);
+  return r.json();
+}
+
+function setStatus(text, cls){status.className = "status" + (cls ? " "+cls : ""); status.innerHTML = text;}
+
+btn.onclick = () => {
+  const cid = clientEl.value.trim();
+  const url = urlEl.value.trim();
+  const m = url.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+  if(!cid){ setStatus("❌ Встав Google OAuth Client ID (див. «Як налаштувати»).","err"); return; }
+  if(!m){ setStatus("❌ Невірне посилання на таблицю.","err"); return; }
+  SID = m[1];
+  btn.disabled = true;
+  setStatus('<span class="spin"></span>Вхід через Google…');
+
+  if(!tokenClient){
+    tokenClient = google.accounts.oauth2.initTokenClient({client_id: cid, scope: SCOPE, callback: () => {}});
+  }
+  tokenClient.callback = (resp) => {
+    if(resp.error || !resp.access_token){
+      setStatus("❌ Вхід не вдався: " + (resp.error || "немає токена"),"err"); btn.disabled=false; return;
+    }
+    accessToken = resp.access_token;
+    runDistribution().catch(e => { setStatus("❌ Помилка: " + e.message,"err"); }).finally(() => { btn.disabled=false; });
+  };
+  tokenClient.requestAccessToken({prompt: accessToken ? "" : "consent"});
+};
+
+async function runDistribution(){
+  setStatus('<span class="spin"></span>Читаю дані з таблиці…');
+
+  // Очищення
+  await api("POST","/values:batchClear",{ranges:
+    ["C2:C","D2:D","J6:J","K6:K","L6:L","M2:M","M3:M","M4:M","M5:M","M6:Z","A100:A"].map(q)});
+
+  // Читання колонок
+  const cols = ["A2:A","B2:B","E2:E","F2:F","G2:G","H2:H"];
+  const params = cols.map(c => `ranges=${encodeURIComponent(q(c))}`).join("&");
+  const got = await api("GET",`/values:batchGet?${params}`);
+  const flat = vr => (vr && vr.values) ? vr.values.map(r => (r[0] ?? "")) : [];
+  const [A,B,E,F,G,H] = got.valueRanges.map(flat);
+
+  const N = Math.max(F.length,E.length,G.length,H.length);
+  const names=[], cards=[], sums=[];
+  for(let i=0;i<N;i++){
+    names.push(F[i] ?? "");
+    sums.push(E[i] ?? "");
+    const g=(G[i]||"").toString().trim();
+    cards.push(g ? g : (H[i] ? H[i].toString().trim() : ""));
+  }
+
+  const nP = Math.max(A.length, B.length);
+  const partnerNames = [], partnerAmounts = [];
+  for(let i=0;i<nP;i++){ partnerNames.push(A[i] ?? ""); partnerAmounts.push(tryFloat(B[i])); }
+  const managerNeeds = sums.map(tryFloat);
+
+  // Матриця
+  const matrix = Array.from({length:nP}, () => new Array(N).fill(0));
+  const partnerBalances = partnerAmounts.slice();
+  const order = [...Array(nP).keys()].sort((a,b)=>partnerBalances[b]-partnerBalances[a]);
+
+  setStatus('<span class="spin"></span>Рахую розподіл…');
+  for(const i of order){
+    while(partnerBalances[i] >= 1){
+      const open = [];
+      for(let j=0;j<N;j++) if(managerNeeds[j] >= 1) open.push(j);
+      if(!open.length) break;
+      const fitting = open.filter(j => managerNeeds[j] >= partnerBalances[i]);
+      let j;
+      if(fitting.length) j = fitting.reduce((m,x)=> managerNeeds[x] < managerNeeds[m] ? x : m, fitting[0]);
+      else j = open.reduce((m,x)=> managerNeeds[x] > managerNeeds[m] ? x : m, open[0]);
+      const pay = Math.min(partnerBalances[i], managerNeeds[j]);
+      matrix[i][j] += pay; partnerBalances[i] -= pay; managerNeeds[j] -= pay;
+    }
+  }
+
+  // Колонка C (погляд партнера) і D (погляд менеджера)
+  const C = partnerNames.map((_,i)=>{
+    const lines=[];
+    for(let j=0;j<Math.min(N,cards.length);j++){const v=matrix[i][j]; if(v>0) lines.push(`${cards[j]}    ${Math.round(v)} грн`);}
+    return [lines.join("\n")];
+  });
+  const D = [];
+  for(let j=0;j<N;j++){
+    const lines=[];
+    for(let i=0;i<nP;i++){const v=matrix[i][j]; if(v>0) lines.push(`${partnerNames[i]}    ${Math.round(v)} грн`);}
+    D.push([lines.join("\n")]);
+  }
+
+  const out = matrix.map(row => row.map(x => Math.round(x)));
+  const last = colLetter(12 + N);
+  const m5 = Array.from({length:N}, (_,i)=>`=${colLetter(13+i)}4-SUM(${colLetter(13+i)}6:${colLetter(13+i)}276)`);
+  const Lf = Array.from({length:nP}, (_,k)=>{const r=6+k; return [`=K${r}-SUM(M${r}:${last}${r})`];});
+
+  // Лог
+  const log = [`Останній запуск: ${nowStr()}`, "===== 🟠 Менеджери з недоплатою ====="];
+  let miss=0; names.forEach((n,i)=>{ if(managerNeeds[i]>0){log.push(`${n}: ${Math.round(managerNeeds[i])} грн`); miss++;} });
+  log.push("===== 🔵 Партнери з залишком =====");
+  let bal=0; partnerNames.forEach((n,i)=>{ if(partnerBalances[i]>0){log.push(`${n}: ${Math.round(partnerBalances[i])} грн`); bal++;} });
+  log.push(`===== ✅ Усього менеджерів з недоплатою: ${miss} =====`);
+  log.push(`===== ✅ Усього партнерів з залишком: ${bal} =====`);
+
+  setStatus('<span class="spin"></span>Записую результат у таблицю…');
+  await api("POST","/values:batchUpdate",{valueInputOption:"USER_ENTERED", data:[
+    {range:q(`C2:C${1+C.length}`), values:C},
+    {range:q(`D2:D${1+D.length}`), values:D},
+    {range:q(`M6:${last}${5+nP}`), values: out.length?out:[[]]},
+    {range:q(`M2:${last}2`), values:[cards]},
+    {range:q(`M3:${last}3`), values:[names]},
+    {range:q(`M4:${last}4`), values:[sums.map(tryFloat)]},
+    {range:q(`M5:${last}5`), values:[m5]},
+    {range:q(`J6:J${5+nP}`), values: partnerNames.map(p=>[p])},
+    {range:q(`K6:K${5+nP}`), values: partnerAmounts.map(x=>[Math.round(x)])},
+    {range:q(`L6:L${5+nP}`), values: Lf},
+    {range:q("A100"), values:[[log.join("\n")]]},
+  ]});
+
+  // Зведення
+  let maxCards=0;
+  for(let i=0;i<nP;i++){let u=0; for(let j=0;j<N;j++) if(matrix[i][j]>0) u++; if(u>maxCards) maxCards=u;}
+  $("s_partners").textContent = nP;
+  $("s_cards").textContent = N;
+  $("s_maxcards").textContent = maxCards;
+  $("s_balance").textContent = bal;
+  $("stats").hidden = false;
+  $("log").textContent = log.join("\n");
+  $("log").hidden = false;
+  setStatus(`✅ Готово! Дані записано в таблицю (${nowStr()})`, "ok");
+}
+</script>
+</body>
+</html>
