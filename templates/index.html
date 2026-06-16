@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Поділ сум по картах</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a21; --line:#262b35;
+    --ink:#eef1f6; --muted:#8b94a7;
+    --accent:#16b8a6; --accent-press:#0e9385;
+    --ok:#3ddc97; --err:#ff6b6b;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; min-height:100vh; background:var(--bg); color:var(--ink);
+    font-family:"Segoe UI",system-ui,-apple-system,sans-serif;
+    display:flex; align-items:center; justify-content:center; padding:28px;
+  }
+  .card{
+    width:100%; max-width:640px; background:var(--panel);
+    border:1px solid var(--line); border-radius:18px; padding:34px 32px;
+    box-shadow:0 24px 60px rgba(0,0,0,.45);
+  }
+  h1{margin:0 0 6px; font-size:30px; letter-spacing:-.4px}
+  .sub{margin:0 0 26px; color:var(--muted); font-size:15px}
+  button{
+    width:100%; border:0; cursor:pointer; color:#04201d;
+    background:var(--accent); font-weight:700; font-size:18px;
+    padding:18px; border-radius:12px; transition:.15s transform,.15s background;
+  }
+  button:hover{background:var(--accent-press)}
+  button:active{transform:translateY(1px)}
+  button:disabled{opacity:.55; cursor:not-allowed}
+  .status{margin-top:20px; font-size:15px; min-height:22px}
+  .status.ok{color:var(--ok)} .status.err{color:var(--err)}
+  .grid{
+    display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:20px;
+  }
+  .stat{background:#10131a; border:1px solid var(--line); border-radius:12px; padding:14px 16px}
+  .stat .n{font-size:24px; font-weight:700}
+  .stat .l{font-size:12px; color:var(--muted); margin-top:2px}
+  pre{
+    margin-top:18px; background:#0b0d12; border:1px solid var(--line);
+    border-radius:12px; padding:16px; white-space:pre-wrap; word-break:break-word;
+    font-size:13px; color:#c7cedb; max-height:280px; overflow:auto;
+  }
+  a.sheet{display:inline-block; margin-top:18px; color:var(--accent); font-size:14px; text-decoration:none}
+  a.sheet:hover{text-decoration:underline}
+  .spin{display:inline-block; width:16px; height:16px; border:2px solid #04201d40;
+    border-top-color:#04201d; border-radius:50%; animation:s .7s linear infinite; vertical-align:-3px; margin-right:8px}
+  @keyframes s{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+  <main class="card">
+    <h1>Поділ сум по картах</h1>
+    <p class="sub">Розкидає суми партнерів по картах зарплат. Кожен партнер — на одну карту, великий — максимум на дві.</p>
+
+    <button id="run">Запустити поділ сум по картах</button>
+
+    <div id="status" class="status"></div>
+
+    <div id="stats" class="grid" hidden>
+      <div class="stat"><div class="n" id="s_partners">—</div><div class="l">Партнерів</div></div>
+      <div class="stat"><div class="n" id="s_cards">—</div><div class="l">Карт</div></div>
+      <div class="stat"><div class="n" id="s_maxcards">—</div><div class="l">Макс. карт на партнера</div></div>
+      <div class="stat"><div class="n" id="s_balance">—</div><div class="l">Партнерів із залишком</div></div>
+    </div>
+
+    <pre id="log" hidden></pre>
+
+    <a class="sheet" href="{{ sheet_url }}" target="_blank">↗ Відкрити Google Таблицю</a>
+  </main>
+
+<script>
+const btn = document.getElementById('run');
+const status = document.getElementById('status');
+const stats = document.getElementById('stats');
+const log = document.getElementById('log');
+
+btn.addEventListener('click', async () => {
+  btn.disabled = true;
+  status.className = 'status';
+  status.innerHTML = '<span class="spin"></span>Рахую та записую в таблицю…';
+  stats.hidden = true; log.hidden = true;
+  try {
+    const r = await fetch('/run', { method: 'POST' });
+    const d = await r.json();
+    if (d.ok) {
+      status.className = 'status ok';
+      status.textContent = '✅ Готово! Дані записано в таблицю (' + d.finished_at + ')';
+      document.getElementById('s_partners').textContent = d.partners;
+      document.getElementById('s_cards').textContent = d.cards;
+      document.getElementById('s_maxcards').textContent = d.max_cards_per_partner;
+      document.getElementById('s_balance').textContent = d.partners_with_balance;
+      stats.hidden = false;
+      log.textContent = d.log; log.hidden = false;
+    } else {
+      status.className = 'status err';
+      status.textContent = '❌ Помилка: ' + d.error;
+      log.textContent = d.trace || ''; log.hidden = !d.trace;
+    }
+  } catch (e) {
+    status.className = 'status err';
+    status.textContent = '❌ Не вдалося звʼязатися із сервером: ' + e;
+  } finally {
+    btn.disabled = false;
+  }
+});
+</script>
+</body>
+</html>
