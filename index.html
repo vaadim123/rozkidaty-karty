@@ -178,7 +178,9 @@ async function runDistribution(){
   // Матриця
   const matrix = Array.from({length:nP}, () => new Array(N).fill(0));
   const partnerBalances = partnerAmounts.slice();
-  const order = [...Array(nP).keys()].sort((a,b)=>partnerBalances[b]-partnerBalances[a]);
+  // Від найменшого до найбільшого: дрібні/середні повністю йдуть на карти,
+  // а надлишок (залишок) концентрується на кількох найбільших партнерах.
+  const order = [...Array(nP).keys()].sort((a,b)=>partnerBalances[a]-partnerBalances[b]);
 
   setStatus('<span class="spin"></span>Рахую розподіл…');
   for(const i of order){
