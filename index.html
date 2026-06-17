@@ -59,7 +59,7 @@
 </head>
 <body>
   <main class="card">
-    <h1>Поділ сум по картах <span style="font-size:13px;color:var(--accent);font-weight:600">v4 · тихий вхід</span></h1>
+    <h1>Поділ сум по картах <span style="font-size:13px;color:var(--accent);font-weight:600">v5 · макс 4 карти</span></h1>
     <p class="sub">Розкидає суми партнерів по картах зарплат у Google&nbsp;Таблиці.
        Дрібні партнери повністю йдуть на карти, залишок — на кількох найбільших.</p>
 
@@ -188,11 +188,16 @@ async function runDistribution(){
   // а надлишок (залишок) концентрується на кількох найбільших партнерах.
   const order = [...Array(nP).keys()].sort((a,b)=>partnerBalances[a]-partnerBalances[b]);
 
+  const MAX_CARDS = 4;                                  // максимум карт на одного клієнта
+  const used = Array.from({length:nP}, () => new Set()); // які карти вже використав партнер
+
   setStatus('<span class="spin"></span>Рахую розподіл…');
   for(const i of order){
     while(partnerBalances[i] >= 1){
-      const open = [];
+      let open = [];
       for(let j=0;j<N;j++) if(managerNeeds[j] >= 1) open.push(j);
+      // якщо ліміт 4 карти вичерпано — далі лише ті карти, які партнер уже використовує
+      if(used[i].size >= MAX_CARDS) open = open.filter(j => used[i].has(j));
       if(!open.length) break;
       const fitting = open.filter(j => managerNeeds[j] >= partnerBalances[i]);
       let j;
@@ -200,6 +205,7 @@ async function runDistribution(){
       else j = open.reduce((m,x)=> managerNeeds[x] > managerNeeds[m] ? x : m, open[0]);
       const pay = Math.min(partnerBalances[i], managerNeeds[j]);
       matrix[i][j] += pay; partnerBalances[i] -= pay; managerNeeds[j] -= pay;
+      used[i].add(j);
     }
   }
 
