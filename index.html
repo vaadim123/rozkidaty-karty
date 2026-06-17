@@ -94,12 +94,13 @@
 <script>
 const SCOPE = "https://www.googleapis.com/auth/spreadsheets";
 const DEFAULT_URL = "https://docs.google.com/spreadsheets/d/1WER4lgVgsS4r-KuTiaai0EOJalc-WZbeYl4EoK0yi0M";
+const DEFAULT_CLIENT = "140970324173-ib8nvcgui6k58r3tequh9f340ah6jqml.apps.googleusercontent.com";
 const SHEET = "Розкидати карти";
 
 const $ = id => document.getElementById(id);
 const clientEl = $("client"), urlEl = $("url"), btn = $("run"), status = $("status");
 
-clientEl.value = localStorage.getItem("gclient") || "";
+clientEl.value = localStorage.getItem("gclient") || DEFAULT_CLIENT;
 urlEl.value = localStorage.getItem("gurl") || DEFAULT_URL;
 clientEl.oninput = () => localStorage.setItem("gclient", clientEl.value.trim());
 urlEl.oninput = () => localStorage.setItem("gurl", urlEl.value.trim());
