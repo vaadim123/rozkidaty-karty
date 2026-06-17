@@ -59,7 +59,7 @@
 </head>
 <body>
   <main class="card">
-    <h1>Поділ сум по картах <span style="font-size:13px;color:var(--accent);font-weight:600">v3 · сорт від меншого</span></h1>
+    <h1>Поділ сум по картах <span style="font-size:13px;color:var(--accent);font-weight:600">v4 · тихий вхід</span></h1>
     <p class="sub">Розкидає суми партнерів по картах зарплат у Google&nbsp;Таблиці.
        Дрібні партнери повністю йдуть на карти, залишок — на кількох найбільших.</p>
 
@@ -93,7 +93,7 @@
   </main>
 
 <script>
-const SCOPE = "https://www.googleapis.com/auth/spreadsheets";
+const SCOPE = "openid email https://www.googleapis.com/auth/spreadsheets";
 const DEFAULT_URL = "https://docs.google.com/spreadsheets/d/1WER4lgVgsS4r-KuTiaai0EOJalc-WZbeYl4EoK0yi0M";
 const DEFAULT_CLIENT = "140970324173-ib8nvcgui6k58r3tequh9f340ah6jqml.apps.googleusercontent.com";
 const SHEET = "Розкидати карти";
@@ -143,9 +143,14 @@ btn.onclick = () => {
       setStatus("❌ Вхід не вдався: " + (resp.error || "немає токена"),"err"); btn.disabled=false; return;
     }
     accessToken = resp.access_token;
+    // запамʼятовуємо акаунт, щоб наступного разу не питати вибір
+    fetch("https://www.googleapis.com/oauth2/v3/userinfo",{headers:{Authorization:"Bearer "+accessToken}})
+      .then(r => r.ok ? r.json() : null).then(u => { if(u && u.email) localStorage.setItem("gmail", u.email); }).catch(()=>{});
     runDistribution().catch(e => { setStatus("❌ Помилка: " + e.message,"err"); }).finally(() => { btn.disabled=false; });
   };
-  tokenClient.requestAccessToken({prompt: accessToken ? "" : "consent"});
+  // prompt:"" → показує вікно тільки якщо це справді потрібно; hint → одразу твій акаунт без вибору
+  const hint = localStorage.getItem("gmail");
+  tokenClient.requestAccessToken(hint ? {prompt: "", hint} : {prompt: ""});
 };
 
 async function runDistribution(){
