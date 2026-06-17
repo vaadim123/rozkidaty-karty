@@ -59,7 +59,7 @@
 </head>
 <body>
   <main class="card">
-    <h1>Поділ сум по картах <span style="font-size:13px;color:var(--accent);font-weight:600">v5 · макс 4 карти</span></h1>
+    <h1>Поділ сум по картах <span style="font-size:13px;color:var(--accent);font-weight:600">v6 · без недоплат</span></h1>
     <p class="sub">Розкидає суми партнерів по картах зарплат у Google&nbsp;Таблиці.
        Дрібні партнери повністю йдуть на карти, залишок — на кількох найбільших.</p>
 
@@ -206,6 +206,20 @@ async function runDistribution(){
       const pay = Math.min(partnerBalances[i], managerNeeds[j]);
       matrix[i][j] += pay; partnerBalances[i] -= pay; managerNeeds[j] -= pay;
       used[i].add(j);
+    }
+  }
+
+  // ДОБИВКА: менеджер НЕ МОЖЕ лишитись недоплаченим. Якщо після ліміту 4 карти
+  // якісь карти ще не закриті — добиваємо їх із партнерів, у кого лишився баланс
+  // (тут ліміт 4 свідомо не діє; беремо партнера з найбільшим залишком).
+  for(let j=0;j<N;j++){
+    while(managerNeeds[j] >= 1){
+      let best = -1;
+      for(let i=0;i<nP;i++) if(partnerBalances[i] >= 1 && (best < 0 || partnerBalances[i] > partnerBalances[best])) best = i;
+      if(best < 0) break; // грошей у партнерів більше немає взагалі
+      const pay = Math.min(managerNeeds[j], partnerBalances[best]);
+      matrix[best][j] += pay; partnerBalances[best] -= pay; managerNeeds[j] -= pay;
+      used[best].add(j);
     }
   }
 
