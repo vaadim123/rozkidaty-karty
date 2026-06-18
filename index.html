@@ -60,7 +60,7 @@
 </head>
 <body>
   <main class="card">
-    <h1>Поділ сум по картах <span style="font-size:13px;color:var(--accent);font-weight:600">v7 · мін 25 грн</span></h1>
+    <h1>Поділ сум по картах <span style="font-size:13px;color:var(--accent);font-weight:600">v8 · правила карт</span></h1>
     <p class="sub">Розкидає суми партнерів по картах зарплат у Google&nbsp;Таблиці.
        Дрібні партнери повністю йдуть на карти, залишок — на кількох найбільших.</p>
 
@@ -98,6 +98,11 @@ const SCOPE = "openid email https://www.googleapis.com/auth/spreadsheets";
 const DEFAULT_URL = "https://docs.google.com/spreadsheets/d/1WER4lgVgsS4r-KuTiaai0EOJalc-WZbeYl4EoK0yi0M";
 const DEFAULT_CLIENT = "140970324173-ib8nvcgui6k58r3tequh9f340ah6jqml.apps.googleusercontent.com";
 const SHEET = "Розкидати карти";
+// Персональні правила: партнеру (match = частина імені) дозволені лише карти,
+// чий номер (без пробілів) починається на prefix. Легко додати нові рядки.
+const CARD_RULES = [
+  { match: "Шульга Богдан", prefix: "4441111" },   // тільки монобанк
+];
 
 const $ = id => document.getElementById(id);
 const clientEl = $("client"), urlEl = $("url"), btn = $("run"), status = $("status");
@@ -193,6 +198,16 @@ async function runDistribution(){
   const MIN_PAY = 25;                                  // мінімальний платіж на одну карту
   const used = Array.from({length:nP}, () => new Set()); // які карти вже використав партнер
 
+  // Персональні обмеження: дозволяти партнеру лише карти з певним префіксом номера
+  const onlyDigits = s => String(s ?? "").replace(/\D/g, "");
+  const cardAllowedFor = (i, j) => {
+    for(const r of CARD_RULES){
+      if(partnerNames[i] && partnerNames[i].includes(r.match))
+        return onlyDigits(cards[j]).startsWith(r.prefix);
+    }
+    return true;
+  };
+
   setStatus('<span class="spin"></span>Рахую розподіл…');
   for(const i of order){
     while(partnerBalances[i] >= MIN_PAY){
@@ -202,6 +217,8 @@ async function runDistribution(){
       if(used[i].size >= MAX_CARDS) open = open.filter(j => used[i].has(j));
       // тільки карти, куди можна заплатити не менше 25 грн (без дрібних шматків)
       open = open.filter(j => Math.min(partnerBalances[i], managerNeeds[j]) >= MIN_PAY);
+      // персональні обмеження (напр. Шульга Богдан → лише монобанк)
+      open = open.filter(j => cardAllowedFor(i, j));
       if(!open.length) break;
       const fitting = open.filter(j => managerNeeds[j] >= partnerBalances[i]);
       let j;
@@ -221,13 +238,13 @@ async function runDistribution(){
       let pick = -1;
       // 1) партнер, що закриває карту одним платежем і ще під лімітом 4
       for(let i=0;i<nP;i++){
-        if(partnerBalances[i] >= managerNeeds[j] && used[i].size < MAX_CARDS){
+        if(partnerBalances[i] >= managerNeeds[j] && used[i].size < MAX_CARDS && cardAllowedFor(i, j)){
           if(pick < 0 || partnerBalances[i] < partnerBalances[pick]) pick = i; // найменший достатній — великих лишаємо
         }
       }
       // 2) інакше — партнер із найбільшим залишком (ліміт 4 тут поступається)
       if(pick < 0){
-        for(let i=0;i<nP;i++) if(partnerBalances[i] >= 1 && (pick < 0 || partnerBalances[i] > partnerBalances[pick])) pick = i;
+        for(let i=0;i<nP;i++) if(partnerBalances[i] >= 1 && cardAllowedFor(i, j) && (pick < 0 || partnerBalances[i] > partnerBalances[pick])) pick = i;
       }
       if(pick < 0) break; // грошей у партнерів більше немає взагалі
       const pay = Math.min(managerNeeds[j], partnerBalances[pick]);
