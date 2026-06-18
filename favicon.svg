@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect width="64" height="64" rx="14" fill="#0f1115"/>
+  <!-- задня картка (натяк на «багато карт») -->
+  <rect x="16" y="14" width="36" height="24" rx="4" fill="#0e9385" opacity="0.55" transform="rotate(-10 34 26)"/>
+  <!-- основна картка -->
+  <rect x="12" y="22" width="40" height="26" rx="4" fill="#16b8a6"/>
+  <rect x="12" y="28" width="40" height="6" fill="#04201d" opacity="0.85"/>
+  <!-- символ гривні -->
+  <text x="32" y="46" text-anchor="middle" font-family="Arial, sans-serif" font-size="15" font-weight="bold" fill="#04201d">₴</text>
+</svg>
