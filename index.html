@@ -60,7 +60,7 @@
 </head>
 <body>
   <main class="card">
-    <h1>Поділ сум по картах <span style="font-size:13px;color:var(--accent);font-weight:600">v10 · великі платежі</span></h1>
+    <h1>Поділ сум по картах <span style="font-size:13px;color:var(--accent);font-weight:600">v11 · правила партнерів</span></h1>
     <p class="sub">Розкидає суми партнерів по картах зарплат у Google&nbsp;Таблиці.
        Дрібні партнери повністю йдуть на карти, залишок — на кількох найбільших.</p>
 
@@ -98,10 +98,12 @@ const SCOPE = "openid email https://www.googleapis.com/auth/spreadsheets";
 const DEFAULT_URL = "https://docs.google.com/spreadsheets/d/1WER4lgVgsS4r-KuTiaai0EOJalc-WZbeYl4EoK0yi0M";
 const DEFAULT_CLIENT = "140970324173-ib8nvcgui6k58r3tequh9f340ah6jqml.apps.googleusercontent.com";
 const SHEET = "Розкидати карти";
-// Персональні правила: партнеру (match = частина імені) дозволені лише карти,
-// чий номер (без пробілів) починається на prefix. Легко додати нові рядки.
+// Персональні правила (match = частина імені партнера):
+//   prefix   — дозволені лише карти, чий номер (без пробілів) починається на prefix
+//   maxCards — жорсткий ліміт карт для цього партнера (напр. завжди 1)
 const CARD_RULES = [
   { match: "Шульга Богдан", prefix: "4441111" },   // тільки монобанк
+  { match: "Шашенко Юрий", maxCards: 1 },          // завжди 1 карта
 ];
 
 const $ = id => document.getElementById(id);
@@ -198,38 +200,44 @@ async function runDistribution(){
   const MIN_PAY = 25;                                  // мінімальний платіж на одну карту
   const used = Array.from({length:nP}, () => new Set()); // які карти вже використав партнер
 
-  // Персональні обмеження: дозволяти партнеру лише карти з певним префіксом номера
+  // Персональні правила
   const onlyDigits = s => String(s ?? "").replace(/\D/g, "");
+  const ruleFor = i => CARD_RULES.find(r => partnerNames[i] && partnerNames[i].includes(r.match));
   const cardAllowedFor = (i, j) => {
-    for(const r of CARD_RULES){
-      if(partnerNames[i] && partnerNames[i].includes(r.match))
-        return onlyDigits(cards[j]).startsWith(r.prefix);
-    }
+    const r = ruleFor(i);
+    if(r && r.prefix) return onlyDigits(cards[j]).startsWith(r.prefix);
     return true;
   };
+  const capFor = i => { const r = ruleFor(i); return (r && r.maxCards) ? r.maxCards : MAX_CARDS; };      // ліміт у головному циклі
+  const hardCapFor = i => { const r = ruleFor(i); return (r && r.maxCards) ? r.maxCards : Infinity; };   // жорсткий ліміт (навіть у добивці)
 
   setStatus('<span class="spin"></span>Рахую розподіл…');
   // Основний розподіл: кожен партнер ЗАКРИВАЄ цілі карти великими платежами.
   // Прагнемо 1 карту; дрібні/середні — повністю на карти; залишок — на найбільших.
   for(const i of order){
+    const capI = capFor(i);
     while(partnerBalances[i] >= MIN_PAY){
       let A = [];
       for(let j=0;j<N;j++) if(managerNeeds[j] >= 1 && cardAllowedFor(i, j)) A.push(j);
-      // м'який ліміт карт: якщо вичерпано — лише ті карти, які партнер уже використовує
-      if(used[i].size >= MAX_CARDS) A = A.filter(j => used[i].has(j));
+      // ліміт карт (для звичайних 5; для правил-партнерів — їхній): якщо вичерпано — лише вже використані
+      if(used[i].size >= capI) A = A.filter(j => used[i].has(j));
+      A = A.filter(j => managerNeeds[j] >= MIN_PAY);
       if(!A.length) break;
-      // 1) карти, які можна ЗАКРИТИ повністю (потреба <= баланс, але >= 25) → найбільша
-      const closable = A.filter(j => managerNeeds[j] <= partnerBalances[i] && managerNeeds[j] >= MIN_PAY);
       let j, pay;
-      if(closable.length){
-        j = closable.reduce((m,x)=> managerNeeds[x] > managerNeeds[m] ? x : m, closable[0]);
-        pay = managerNeeds[j];                       // закриваємо карту повністю
-      } else {
-        // 2) закрити жодну не можна — ллємо весь баланс у карту з найбільшою потребою
-        const big = A.filter(j => managerNeeds[j] >= MIN_PAY);
-        if(!big.length) break;
-        j = big.reduce((m,x)=> managerNeeds[x] > managerNeeds[m] ? x : m, big[0]);
+      if(capI === 1){
+        // завжди 1 карта: ллємо максимум у карту з найбільшою потребою
+        j = A.reduce((m,x)=> managerNeeds[x] > managerNeeds[m] ? x : m, A[0]);
         pay = Math.min(partnerBalances[i], managerNeeds[j]);
+      } else {
+        // карти, які можна ЗАКРИТИ повністю (потреба <= баланс) → найбільша; інакше ллємо все в найбільшу
+        const closable = A.filter(j => managerNeeds[j] <= partnerBalances[i]);
+        if(closable.length){
+          j = closable.reduce((m,x)=> managerNeeds[x] > managerNeeds[m] ? x : m, closable[0]);
+          pay = managerNeeds[j];                     // закриваємо карту повністю
+        } else {
+          j = A.reduce((m,x)=> managerNeeds[x] > managerNeeds[m] ? x : m, A[0]);
+          pay = Math.min(partnerBalances[i], managerNeeds[j]);
+        }
       }
       if(pay < MIN_PAY) break;
       matrix[i][j] += pay; partnerBalances[i] -= pay; managerNeeds[j] -= pay;
@@ -242,7 +250,11 @@ async function runDistribution(){
   for(let j=0;j<N;j++){
     while(managerNeeds[j] >= 1){
       let pick = -1;
-      for(let i=0;i<nP;i++) if(partnerBalances[i] >= 1 && cardAllowedFor(i, j) && (pick < 0 || partnerBalances[i] > partnerBalances[pick])) pick = i;
+      for(let i=0;i<nP;i++){
+        // не перевищуємо жорсткий ліміт (напр. Шашенко завжди 1 карта)
+        if(used[i].size >= hardCapFor(i) && !used[i].has(j)) continue;
+        if(partnerBalances[i] >= 1 && cardAllowedFor(i, j) && (pick < 0 || partnerBalances[i] > partnerBalances[pick])) pick = i;
+      }
       if(pick < 0) break; // грошей у партнерів більше немає взагалі
       const pay = Math.min(managerNeeds[j], partnerBalances[pick]);
       matrix[pick][j] += pay; partnerBalances[pick] -= pay; managerNeeds[j] -= pay;
