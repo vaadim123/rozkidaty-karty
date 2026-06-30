@@ -60,7 +60,7 @@
 </head>
 <body>
   <main class="card">
-    <h1>Поділ сум по картах <span style="font-size:13px;color:var(--accent);font-weight:600">v9 · макс 5 карт</span></h1>
+    <h1>Поділ сум по картах <span style="font-size:13px;color:var(--accent);font-weight:600">v10 · великі платежі</span></h1>
     <p class="sub">Розкидає суми партнерів по картах зарплат у Google&nbsp;Таблиці.
        Дрібні партнери повністю йдуть на карти, залишок — на кількох найбільших.</p>
 
@@ -209,43 +209,40 @@ async function runDistribution(){
   };
 
   setStatus('<span class="spin"></span>Рахую розподіл…');
+  // Основний розподіл: кожен партнер ЗАКРИВАЄ цілі карти великими платежами.
+  // Прагнемо 1 карту; дрібні/середні — повністю на карти; залишок — на найбільших.
   for(const i of order){
     while(partnerBalances[i] >= MIN_PAY){
-      let open = [];
-      for(let j=0;j<N;j++) if(managerNeeds[j] >= 1) open.push(j);
-      // ліміт 4 карти вичерпано — далі лише ті карти, які партнер уже використовує
-      if(used[i].size >= MAX_CARDS) open = open.filter(j => used[i].has(j));
-      // тільки карти, куди можна заплатити не менше 25 грн (без дрібних шматків)
-      open = open.filter(j => Math.min(partnerBalances[i], managerNeeds[j]) >= MIN_PAY);
-      // персональні обмеження (напр. Шульга Богдан → лише монобанк)
-      open = open.filter(j => cardAllowedFor(i, j));
-      if(!open.length) break;
-      const fitting = open.filter(j => managerNeeds[j] >= partnerBalances[i]);
-      let j;
-      if(fitting.length) j = fitting.reduce((m,x)=> managerNeeds[x] < managerNeeds[m] ? x : m, fitting[0]);
-      else j = open.reduce((m,x)=> managerNeeds[x] > managerNeeds[m] ? x : m, open[0]);
-      const pay = Math.min(partnerBalances[i], managerNeeds[j]);
+      let A = [];
+      for(let j=0;j<N;j++) if(managerNeeds[j] >= 1 && cardAllowedFor(i, j)) A.push(j);
+      // м'який ліміт карт: якщо вичерпано — лише ті карти, які партнер уже використовує
+      if(used[i].size >= MAX_CARDS) A = A.filter(j => used[i].has(j));
+      if(!A.length) break;
+      // 1) карти, які можна ЗАКРИТИ повністю (потреба <= баланс, але >= 25) → найбільша
+      const closable = A.filter(j => managerNeeds[j] <= partnerBalances[i] && managerNeeds[j] >= MIN_PAY);
+      let j, pay;
+      if(closable.length){
+        j = closable.reduce((m,x)=> managerNeeds[x] > managerNeeds[m] ? x : m, closable[0]);
+        pay = managerNeeds[j];                       // закриваємо карту повністю
+      } else {
+        // 2) закрити жодну не можна — ллємо весь баланс у карту з найбільшою потребою
+        const big = A.filter(j => managerNeeds[j] >= MIN_PAY);
+        if(!big.length) break;
+        j = big.reduce((m,x)=> managerNeeds[x] > managerNeeds[m] ? x : m, big[0]);
+        pay = Math.min(partnerBalances[i], managerNeeds[j]);
+      }
+      if(pay < MIN_PAY) break;
       matrix[i][j] += pay; partnerBalances[i] -= pay; managerNeeds[j] -= pay;
       used[i].add(j);
     }
   }
 
-  // ДОБИВКА: менеджер НЕ МОЖЕ лишитись недоплаченим (це головне правило).
-  // Спершу намагаємось закрити карту одним партнером, який ще не має 4 карт;
-  // лише як крайній захід беремо найбільшого (він може перевищити 4 — вимушено).
+  // ГАРАНТІЯ без недоплат: якщо десь лишилась незакрита потреба (зокрема дрібна <25) —
+  // добиваємо найбільшим залишком. Рідко; саме тут можливі поодинокі суми <25.
   for(let j=0;j<N;j++){
     while(managerNeeds[j] >= 1){
       let pick = -1;
-      // 1) партнер, що закриває карту одним платежем і ще під лімітом 4
-      for(let i=0;i<nP;i++){
-        if(partnerBalances[i] >= managerNeeds[j] && used[i].size < MAX_CARDS && cardAllowedFor(i, j)){
-          if(pick < 0 || partnerBalances[i] < partnerBalances[pick]) pick = i; // найменший достатній — великих лишаємо
-        }
-      }
-      // 2) інакше — партнер із найбільшим залишком (ліміт 4 тут поступається)
-      if(pick < 0){
-        for(let i=0;i<nP;i++) if(partnerBalances[i] >= 1 && cardAllowedFor(i, j) && (pick < 0 || partnerBalances[i] > partnerBalances[pick])) pick = i;
-      }
+      for(let i=0;i<nP;i++) if(partnerBalances[i] >= 1 && cardAllowedFor(i, j) && (pick < 0 || partnerBalances[i] > partnerBalances[pick])) pick = i;
       if(pick < 0) break; // грошей у партнерів більше немає взагалі
       const pay = Math.min(managerNeeds[j], partnerBalances[pick]);
       matrix[pick][j] += pay; partnerBalances[pick] -= pay; managerNeeds[j] -= pay;
