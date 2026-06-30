@@ -60,18 +60,16 @@
 </head>
 <body>
   <main class="card">
-    <h1>Поділ сум по картах <span style="font-size:13px;color:var(--accent);font-weight:600">v12 · ліміт карт</span></h1>
+    <h1>Поділ сум по картах <span style="font-size:13px;color:var(--accent);font-weight:600">v13 · великі перші</span></h1>
     <p class="sub">Розкидає суми партнерів по картах зарплат у Google&nbsp;Таблиці.
-       Дрібні партнери повністю йдуть на карти, залишок — на кількох найбільших.</p>
+       Найбільші партнери закривають карти першими; решта добивається так, щоб
+       <b>жодна карта не лишилась недоплаченою</b>.</p>
 
     <label for="client">Google OAuth Client ID</label>
     <input id="client" placeholder="1234567890-xxxx.apps.googleusercontent.com">
 
     <label for="url">Посилання на таблицю</label>
     <input id="url" placeholder="https://docs.google.com/spreadsheets/d/...">
-
-    <label for="hardcap">Жорсткий ліміт карт на партнера (порожньо — без обмеження)</label>
-    <input id="hardcap" inputmode="numeric" placeholder="напр. 5 — тоді залишок гігантів стане недоплатою">
 
     <button id="run">Увійти через Google і запустити поділ</button>
 
@@ -110,19 +108,17 @@ const CARD_RULES = [
 ];
 
 const $ = id => document.getElementById(id);
-const clientEl = $("client"), urlEl = $("url"), hardcapEl = $("hardcap"), btn = $("run"), status = $("status");
+const clientEl = $("client"), urlEl = $("url"), btn = $("run"), status = $("status");
 
 clientEl.value = localStorage.getItem("gclient") || DEFAULT_CLIENT;
 urlEl.value = localStorage.getItem("gurl") || DEFAULT_URL;
-hardcapEl.value = localStorage.getItem("ghardcap") || "";
 clientEl.oninput = () => localStorage.setItem("gclient", clientEl.value.trim());
 urlEl.oninput = () => localStorage.setItem("gurl", urlEl.value.trim());
-hardcapEl.oninput = () => localStorage.setItem("ghardcap", hardcapEl.value.trim());
 
 let tokenClient = null, accessToken = null, SID = null;
 
 function colLetter(n){let s="";while(n>0){let r=(n-1)%26;s=String.fromCharCode(65+r)+s;n=Math.floor((n-1)/26);}return s;}
-function tryFloat(x){const c=String(x??"").replace(/ /g,"").replace(/\s/g,"").trim();const n=Number(c);return isNaN(n)?0:n;}
+function tryFloat(x){const c=String(x??"").replace(/ /g,"").replace(/\s/g,"").trim();const n=Number(c);return isNaN(n)?0:n;}
 function q(range){return `'${SHEET}'!${range}`;}
 function pad2(n){return String(n).padStart(2,"0");}
 function nowStr(){const d=new Date();return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;}
@@ -197,16 +193,12 @@ async function runDistribution(){
   // Матриця
   const matrix = Array.from({length:nP}, () => new Array(N).fill(0));
   const partnerBalances = partnerAmounts.slice();
-  // Від найменшого до найбільшого: дрібні/середні повністю йдуть на карти,
-  // а надлишок (залишок) концентрується на кількох найбільших партнерах.
-  const order = [...Array(nP).keys()].sort((a,b)=>partnerBalances[a]-partnerBalances[b]);
+  // ВЕЛИКІ ПЕРШІ: найбільші партнери закривають карти першими великими платежами.
+  const order = [...Array(nP).keys()].sort((a,b)=>partnerBalances[b]-partnerBalances[a]);
 
   const MAX_CARDS = 5;                                  // максимум карт на одного клієнта (м'який ліміт), прагнемо 1
   const MIN_PAY = 25;                                  // мінімальний платіж на одну карту
   const used = Array.from({length:nP}, () => new Set()); // які карти вже використав партнер
-
-  // Жорсткий ліміт карт на ВСІХ партнерів (із поля); порожньо → без обмеження
-  const HARD_LIMIT = (parseInt(hardcapEl.value, 10) > 0) ? parseInt(hardcapEl.value, 10) : Infinity;
 
   // Персональні правила
   const onlyDigits = s => String(s ?? "").replace(/\D/g, "");
@@ -216,12 +208,12 @@ async function runDistribution(){
     if(r && r.prefix) return onlyDigits(cards[j]).startsWith(r.prefix);
     return true;
   };
-  const capFor = i => { const r = ruleFor(i); return Math.min((r && r.maxCards) ? r.maxCards : MAX_CARDS, HARD_LIMIT); };      // ліміт у головному циклі
-  const hardCapFor = i => { const r = ruleFor(i); return Math.min((r && r.maxCards) ? r.maxCards : Infinity, HARD_LIMIT); };   // стеля навіть у добивці
+  const capFor = i => { const r = ruleFor(i); return (r && r.maxCards) ? r.maxCards : MAX_CARDS; };      // ліміт у головному циклі
+  const hardCapFor = i => { const r = ruleFor(i); return (r && r.maxCards) ? r.maxCards : Infinity; };   // стеля навіть у добивці
 
   setStatus('<span class="spin"></span>Рахую розподіл…');
-  // Основний розподіл: кожен партнер ЗАКРИВАЄ цілі карти великими платежами.
-  // Прагнемо 1 карту; дрібні/середні — повністю на карти; залишок — на найбільших.
+  // Основний розподіл: великі партнери ЗАКРИВАЮТЬ цілі карти великими платежами.
+  // Прагнемо 1 карту; що більший партнер — то більше карт закриє повністю.
   for(const i of order){
     const capI = capFor(i);
     while(partnerBalances[i] >= MIN_PAY){
@@ -253,8 +245,8 @@ async function runDistribution(){
     }
   }
 
-  // ГАРАНТІЯ без недоплат: якщо десь лишилась незакрита потреба (зокрема дрібна <25) —
-  // добиваємо найбільшим залишком. Рідко; саме тут можливі поодинокі суми <25.
+  // БЕЗ НЕДОПЛАТ: якщо десь лишилась незакрита потреба (зокрема дрібна <25) —
+  // добиваємо найбільшим залишком будь-якого партнера, доки гроші є.
   for(let j=0;j<N;j++){
     while(managerNeeds[j] >= 1){
       let pick = -1;
