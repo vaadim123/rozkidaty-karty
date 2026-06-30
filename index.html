@@ -60,10 +60,11 @@
 </head>
 <body>
   <main class="card">
-    <h1>Поділ сум по картах <span style="font-size:13px;color:var(--accent);font-weight:600">v13 · великі перші</span></h1>
+    <h1>Поділ сум по картах <span style="font-size:13px;color:var(--accent);font-weight:600">v14 · мало залишків</span></h1>
     <p class="sub">Розкидає суми партнерів по картах зарплат у Google&nbsp;Таблиці.
-       Найбільші партнери закривають карти першими; решта добивається так, щоб
-       <b>жодна карта не лишилась недоплаченою</b>.</p>
+       Дрібні партнери повністю йдуть на карти, а <b>залишок концентрується на
+       кількох найбільших</b> (краще один партнер з великим залишком, ніж багато
+       дрібних). Прагнемо ≤2 карти на партнера, до 5 — лише якщо інакше не вкладається.</p>
 
     <label for="client">Google OAuth Client ID</label>
     <input id="client" placeholder="1234567890-xxxx.apps.googleusercontent.com">
@@ -103,8 +104,8 @@ const SHEET = "Розкидати карти";
 //   prefix   — дозволені лише карти, чий номер (без пробілів) починається на prefix
 //   maxCards — жорсткий ліміт карт для цього партнера (напр. завжди 1)
 const CARD_RULES = [
-  { match: "Шульга Богдан", prefix: "4441111" },   // тільки монобанк
-  { match: "Шашенко Юрий", maxCards: 1 },          // завжди 1 карта
+  { match: "Шульга Богдан", prefix: "4441111", maxCards: 2 }, // тільки монобанк, максимум 2 карти
+  { match: "Шашенко Юрий", maxCards: 1 },                     // завжди 1 карта
 ];
 
 const $ = id => document.getElementById(id);
@@ -193,10 +194,9 @@ async function runDistribution(){
   // Матриця
   const matrix = Array.from({length:nP}, () => new Array(N).fill(0));
   const partnerBalances = partnerAmounts.slice();
-  // ВЕЛИКІ ПЕРШІ: найбільші партнери закривають карти першими великими платежами.
-  const order = [...Array(nP).keys()].sort((a,b)=>partnerBalances[b]-partnerBalances[a]);
 
-  const MAX_CARDS = 5;                                  // максимум карт на одного клієнта (м'який ліміт), прагнемо 1
+  const SOFT_CARDS = 2;                                 // прагнемо не більше 2 карт на партнера
+  const HARD_CARDS = 5;                                 // дозволяємо до 5, якщо інакше не вкладається
   const MIN_PAY = 25;                                  // мінімальний платіж на одну карту
   const used = Array.from({length:nP}, () => new Set()); // які карти вже використав партнер
 
@@ -208,29 +208,26 @@ async function runDistribution(){
     if(r && r.prefix) return onlyDigits(cards[j]).startsWith(r.prefix);
     return true;
   };
-  const capFor = i => { const r = ruleFor(i); return (r && r.maxCards) ? r.maxCards : MAX_CARDS; };      // ліміт у головному циклі
-  const hardCapFor = i => { const r = ruleFor(i); return (r && r.maxCards) ? r.maxCards : Infinity; };   // стеля навіть у добивці
+  // персональна стеля карт (Шашенко=1, Шульга=2), інакше без особистого обмеження
+  const personalCap = i => { const r = ruleFor(i); return (r && r.maxCards) ? r.maxCards : Infinity; };
 
   setStatus('<span class="spin"></span>Рахую розподіл…');
-  // Основний розподіл: великі партнери ЗАКРИВАЮТЬ цілі карти великими платежами.
-  // Прагнемо 1 карту; що більший партнер — то більше карт закриє повністю.
-  for(const i of order){
-    const capI = capFor(i);
-    while(partnerBalances[i] >= MIN_PAY){
-      let A = [];
-      for(let j=0;j<N;j++) if(managerNeeds[j] >= 1 && cardAllowedFor(i, j)) A.push(j);
-      // ліміт карт (для звичайних 5; для правил-партнерів — їхній): якщо вичерпано — лише вже використані
-      if(used[i].size >= capI) A = A.filter(j => used[i].has(j));
-      A = A.filter(j => managerNeeds[j] >= MIN_PAY);
-      if(!A.length) break;
-      let j, pay;
-      if(capI === 1){
-        // завжди 1 карта: ллємо максимум у карту з найбільшою потребою
-        j = A.reduce((m,x)=> managerNeeds[x] > managerNeeds[m] ? x : m, A[0]);
-        pay = Math.min(partnerBalances[i], managerNeeds[j]);
-      } else {
+  // Основний розподіл: МАЛІ ПЕРШІ — дрібні/середні партнери повністю спорожнюються
+  // у карти (закриваючи їх великими платежами), а надлишок концентрується на
+  // кількох найбільших, яких обробляємо останніми. `cap` — стеля карт цього проходу.
+  function distribute(cap){
+    const order = [...Array(nP).keys()].sort((a,b)=>partnerBalances[a]-partnerBalances[b]); // малі перші
+    for(const i of order){
+      const capI = Math.min(cap, personalCap(i));
+      while(partnerBalances[i] >= MIN_PAY){
+        let A = [];
+        for(let j=0;j<N;j++) if(managerNeeds[j] >= 1 && cardAllowedFor(i, j)) A.push(j);
+        if(used[i].size >= capI) A = A.filter(j => used[i].has(j)); // стеля карт вичерпана — лише вже використані
+        A = A.filter(j => managerNeeds[j] >= MIN_PAY);
+        if(!A.length) break;
         // карти, які можна ЗАКРИТИ повністю (потреба <= баланс) → найбільша; інакше ллємо все в найбільшу
         const closable = A.filter(j => managerNeeds[j] <= partnerBalances[i]);
+        let j, pay;
         if(closable.length){
           j = closable.reduce((m,x)=> managerNeeds[x] > managerNeeds[m] ? x : m, closable[0]);
           pay = managerNeeds[j];                     // закриваємо карту повністю
@@ -238,29 +235,37 @@ async function runDistribution(){
           j = A.reduce((m,x)=> managerNeeds[x] > managerNeeds[m] ? x : m, A[0]);
           pay = Math.min(partnerBalances[i], managerNeeds[j]);
         }
+        if(pay < MIN_PAY) break;
+        matrix[i][j] += pay; partnerBalances[i] -= pay; managerNeeds[j] -= pay;
+        used[i].add(j);
       }
-      if(pay < MIN_PAY) break;
-      matrix[i][j] += pay; partnerBalances[i] -= pay; managerNeeds[j] -= pay;
-      used[i].add(j);
     }
   }
 
-  // БЕЗ НЕДОПЛАТ: якщо десь лишилась незакрита потреба (зокрема дрібна <25) —
-  // добиваємо найбільшим залишком будь-якого партнера, доки гроші є.
-  for(let j=0;j<N;j++){
-    while(managerNeeds[j] >= 1){
-      let pick = -1;
-      for(let i=0;i<nP;i++){
-        // не перевищуємо жорсткий ліміт (напр. Шашенко завжди 1 карта)
-        if(used[i].size >= hardCapFor(i) && !used[i].has(j)) continue;
-        if(partnerBalances[i] >= 1 && cardAllowedFor(i, j) && (pick < 0 || partnerBalances[i] > partnerBalances[pick])) pick = i;
+  // Добивання незакритих карт (зокрема дрібних потреб <25). Тягнемо з НАЙБІЛЬШОГО
+  // залишку, щоб дрібніші партнери лишались спорожнені, а залишок — на гігантах.
+  // `ceil` — глобальна стеля карт для цього проходу.
+  function topup(ceil){
+    for(let j=0;j<N;j++){
+      while(managerNeeds[j] >= 1){
+        let pick = -1;
+        for(let i=0;i<nP;i++){
+          const c = Math.min(ceil, personalCap(i));
+          if(used[i].size >= c && !used[i].has(j)) continue; // не перевищуємо стелю карт
+          if(partnerBalances[i] >= 1 && cardAllowedFor(i, j) && (pick < 0 || partnerBalances[i] > partnerBalances[pick])) pick = i;
+        }
+        if(pick < 0) break; // ніхто не може взяти цю карту в межах стелі
+        const pay = Math.min(managerNeeds[j], partnerBalances[pick]);
+        matrix[pick][j] += pay; partnerBalances[pick] -= pay; managerNeeds[j] -= pay;
+        used[pick].add(j);
       }
-      if(pick < 0) break; // грошей у партнерів більше немає взагалі
-      const pay = Math.min(managerNeeds[j], partnerBalances[pick]);
-      matrix[pick][j] += pay; partnerBalances[pick] -= pay; managerNeeds[j] -= pay;
-      used[pick].add(j);
     }
   }
+
+  distribute(SOFT_CARDS);   // спершу прагнемо ≤2 карти на партнера
+  distribute(HARD_CARDS);   // потім добиваємо до 5 — спорожнюємо середніх і закриваємо карти
+  topup(HARD_CARDS);        // закриваємо дрібні залишки в межах 5 карт
+  topup(Infinity);          // крайній випадок: дозволяємо >5 карт, аби не лишити недоплати
 
   // Колонка C (погляд партнера) і D (погляд менеджера)
   const C = partnerNames.map((_,i)=>{
