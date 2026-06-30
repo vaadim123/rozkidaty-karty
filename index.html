@@ -60,7 +60,7 @@
 </head>
 <body>
   <main class="card">
-    <h1>Поділ сум по картах <span style="font-size:13px;color:var(--accent);font-weight:600">v11 · правила партнерів</span></h1>
+    <h1>Поділ сум по картах <span style="font-size:13px;color:var(--accent);font-weight:600">v12 · ліміт карт</span></h1>
     <p class="sub">Розкидає суми партнерів по картах зарплат у Google&nbsp;Таблиці.
        Дрібні партнери повністю йдуть на карти, залишок — на кількох найбільших.</p>
 
@@ -69,6 +69,9 @@
 
     <label for="url">Посилання на таблицю</label>
     <input id="url" placeholder="https://docs.google.com/spreadsheets/d/...">
+
+    <label for="hardcap">Жорсткий ліміт карт на партнера (порожньо — без обмеження)</label>
+    <input id="hardcap" inputmode="numeric" placeholder="напр. 5 — тоді залишок гігантів стане недоплатою">
 
     <button id="run">Увійти через Google і запустити поділ</button>
 
@@ -107,12 +110,14 @@ const CARD_RULES = [
 ];
 
 const $ = id => document.getElementById(id);
-const clientEl = $("client"), urlEl = $("url"), btn = $("run"), status = $("status");
+const clientEl = $("client"), urlEl = $("url"), hardcapEl = $("hardcap"), btn = $("run"), status = $("status");
 
 clientEl.value = localStorage.getItem("gclient") || DEFAULT_CLIENT;
 urlEl.value = localStorage.getItem("gurl") || DEFAULT_URL;
+hardcapEl.value = localStorage.getItem("ghardcap") || "";
 clientEl.oninput = () => localStorage.setItem("gclient", clientEl.value.trim());
 urlEl.oninput = () => localStorage.setItem("gurl", urlEl.value.trim());
+hardcapEl.oninput = () => localStorage.setItem("ghardcap", hardcapEl.value.trim());
 
 let tokenClient = null, accessToken = null, SID = null;
 
@@ -200,6 +205,9 @@ async function runDistribution(){
   const MIN_PAY = 25;                                  // мінімальний платіж на одну карту
   const used = Array.from({length:nP}, () => new Set()); // які карти вже використав партнер
 
+  // Жорсткий ліміт карт на ВСІХ партнерів (із поля); порожньо → без обмеження
+  const HARD_LIMIT = (parseInt(hardcapEl.value, 10) > 0) ? parseInt(hardcapEl.value, 10) : Infinity;
+
   // Персональні правила
   const onlyDigits = s => String(s ?? "").replace(/\D/g, "");
   const ruleFor = i => CARD_RULES.find(r => partnerNames[i] && partnerNames[i].includes(r.match));
@@ -208,8 +216,8 @@ async function runDistribution(){
     if(r && r.prefix) return onlyDigits(cards[j]).startsWith(r.prefix);
     return true;
   };
-  const capFor = i => { const r = ruleFor(i); return (r && r.maxCards) ? r.maxCards : MAX_CARDS; };      // ліміт у головному циклі
-  const hardCapFor = i => { const r = ruleFor(i); return (r && r.maxCards) ? r.maxCards : Infinity; };   // жорсткий ліміт (навіть у добивці)
+  const capFor = i => { const r = ruleFor(i); return Math.min((r && r.maxCards) ? r.maxCards : MAX_CARDS, HARD_LIMIT); };      // ліміт у головному циклі
+  const hardCapFor = i => { const r = ruleFor(i); return Math.min((r && r.maxCards) ? r.maxCards : Infinity, HARD_LIMIT); };   // стеля навіть у добивці
 
   setStatus('<span class="spin"></span>Рахую розподіл…');
   // Основний розподіл: кожен партнер ЗАКРИВАЄ цілі карти великими платежами.
