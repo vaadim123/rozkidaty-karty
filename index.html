@@ -60,7 +60,7 @@
 </head>
 <body>
   <main class="card">
-    <h1>Поділ сум по картах <span style="font-size:13px;color:var(--accent);font-weight:600">v8 · правила карт</span></h1>
+    <h1>Поділ сум по картах <span style="font-size:13px;color:var(--accent);font-weight:600">v9 · макс 5 карт</span></h1>
     <p class="sub">Розкидає суми партнерів по картах зарплат у Google&nbsp;Таблиці.
        Дрібні партнери повністю йдуть на карти, залишок — на кількох найбільших.</p>
 
@@ -194,7 +194,7 @@ async function runDistribution(){
   // а надлишок (залишок) концентрується на кількох найбільших партнерах.
   const order = [...Array(nP).keys()].sort((a,b)=>partnerBalances[a]-partnerBalances[b]);
 
-  const MAX_CARDS = 4;                                  // максимум карт на одного клієнта (м'який ліміт)
+  const MAX_CARDS = 5;                                  // максимум карт на одного клієнта (м'який ліміт), прагнемо 1
   const MIN_PAY = 25;                                  // мінімальний платіж на одну карту
   const used = Array.from({length:nP}, () => new Set()); // які карти вже використав партнер
 
