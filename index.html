@@ -60,11 +60,12 @@
 </head>
 <body>
   <main class="card">
-    <h1>Поділ сум по картах <span style="font-size:13px;color:var(--accent);font-weight:600">v20 · як стара версія</span></h1>
+    <h1>Поділ сум по картах <span style="font-size:13px;color:var(--accent);font-weight:600">v21 · як стара версія</span></h1>
     <p class="sub">Розкидає суми партнерів по картах зарплат у Google&nbsp;Таблиці.
        Логіка як у старій робочій програмі: по кожному менеджеру набираємо партнерів
        у порядку списку, <b>не більше 4 партнерів на карту</b>; дрібний партнер лягає
-       на одну карту цілком. Плюс правила: Шульга — тільки монобанк (≤2 карти), Шашенко — 1 карта.</p>
+       на одну карту цілком. Правила: Шульга — тільки монобанк, <b>1 карта на всю суму</b>;
+       Шашенко — <b>1 карта на всю суму</b>.</p>
 
     <label for="client">Google OAuth Client ID</label>
     <input id="client" placeholder="1234567890-xxxx.apps.googleusercontent.com">
@@ -104,8 +105,8 @@ const SHEET = "Розкидати карти";
 //   prefix   — дозволені лише карти, чий номер (без пробілів) починається на prefix
 //   maxCards — жорсткий ліміт карт для цього партнера (напр. завжди 1)
 const CARD_RULES = [
-  { match: "Шульга Богдан", prefix: "4441111", maxCards: 2 }, // тільки монобанк, максимум 2 карти
-  { match: "Шашенко Юрий", maxCards: 1 },                     // завжди 1 карта
+  { match: "Шульга Богдан", prefix: "4441111", maxCards: 1 }, // тільки монобанк, 1 карта на всю суму
+  { match: "Шашенко Юрий", maxCards: 1 },                     // 1 карта на всю суму
 ];
 
 const $ = id => document.getElementById(id);
@@ -211,6 +212,27 @@ async function runDistribution(){
   const personalCap = i => { const r = ruleFor(i); return (r && r.maxCards) ? r.maxCards : Infinity; };
 
   setStatus('<span class="spin"></span>Рахую розподіл…');
+
+  // СПЕРШУ — партнери з персональними правилами (Шашенко, Шульга): кладемо їхню суму
+  // ЦІЛКОМ на одну потрібну карту (не «скільки влізе в першу-ліпшу»). Шульга — лише
+  // монобанк. Best-fit: найменша дозволена карта, що вміщує весь залишок; інакше найбільша.
+  for(let i=0;i<nP;i++){
+    if(!ruleFor(i)) continue;
+    const cap = personalCap(i);
+    while(partnerBalances[i] >= 1 && used[i].size < cap){
+      let allowed = [];
+      for(let j=0;j<N;j++)
+        if(managerNeeds[j] > 0 && cardAllowedFor(i, j) && (managerSources[j].size < MAX_SOURCES || managerSources[j].has(i))) allowed.push(j);
+      if(!allowed.length) break;
+      const fit = allowed.filter(j => managerNeeds[j] >= partnerBalances[i]); // карта вміщує ВСЮ його суму
+      let j;
+      if(fit.length) j = fit.reduce((m,x)=> managerNeeds[x] < managerNeeds[m] ? x : m, fit[0]); // best-fit: найменша така
+      else           j = allowed.reduce((m,x)=> managerNeeds[x] > managerNeeds[m] ? x : m, allowed[0]); // інакше найбільша
+      const pay = Math.min(partnerBalances[i], managerNeeds[j]);
+      matrix[i][j] += pay; managerNeeds[j] -= pay; partnerBalances[i] -= pay;
+      managerSources[j].add(i); used[i].add(j);
+    }
+  }
 
   // РОЗПОДІЛ як у старій робочій програмі: по-МЕНЕДЖЕРНО.
   // Для кожного менеджера (карти) йдемо партнерами В ПОРЯДКУ СПИСКУ; кожен кладе
