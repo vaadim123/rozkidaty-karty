@@ -60,10 +60,11 @@
 </head>
 <body>
   <main class="card">
-    <h1>Поділ сум по картах <span style="font-size:13px;color:var(--accent);font-weight:600">v17 · best-fit</span></h1>
+    <h1>Поділ сум по картах <span style="font-size:13px;color:var(--accent);font-weight:600">v18 · концентрація залишку</span></h1>
     <p class="sub">Розкидає суми партнерів по картах зарплат у Google&nbsp;Таблиці.
-       Кожен партнер іде на <b>якнайменше карт</b>: більшість — на одну; великий —
-       на 2-3 найбільші карти (best-fit), а не на десятки дрібних. <b>Без недоплат</b>.</p>
+       Кожен партнер іде на <b>якнайменше карт</b> (більшість — на одну; великий —
+       на 2-3, best-fit). Надлишок грошей <b>концентрується на найбільших</b>
+       партнерах, а не розсипається по дрібних. <b>Без недоплат</b>.</p>
 
     <label for="client">Google OAuth Client ID</label>
     <input id="client" placeholder="1234567890-xxxx.apps.googleusercontent.com">
@@ -209,6 +210,25 @@ async function runDistribution(){
   const personalCap = i => { const r = ruleFor(i); return (r && r.maxCards) ? r.maxCards : Infinity; };
 
   setStatus('<span class="spin"></span>Рахую розподіл…');
+
+  // КОНЦЕНТРАЦІЯ ЗАЛИШКУ. Якщо сумарно грошей партнерів більше за потреби карт,
+  // надлишок резервуємо на НАЙБІЛЬШИХ партнерах: вони й триматимуть залишок, а всі
+  // дрібні спорожнюються повністю. (Краще великий партнер із залишком, ніж десятки
+  // дрібних по копійці.) Зарезервоване не роздаємо в цьому запуску — повертаємо в
+  // баланс наприкінці, тож воно чесно показується як залишок саме на великих.
+  const reserved = new Array(nP).fill(0);
+  {
+    const totalNeed  = managerNeeds.reduce((a,b)=>a+b, 0);
+    const totalMoney = partnerBalances.reduce((a,b)=>a+b, 0);
+    let surplus = Math.max(0, totalMoney - totalNeed);
+    const bigFirst = [...Array(nP).keys()].sort((a,b)=>partnerBalances[b]-partnerBalances[a]);
+    for(const i of bigFirst){
+      if(surplus < 1) break;
+      const r = Math.min(surplus, partnerBalances[i]);
+      reserved[i] = r; partnerBalances[i] -= r; surplus -= r;
+    }
+  }
+
   // Розподіл як у старій версії, що ділила найкраще: ВЕЛИКІ ПЕРШІ + best-fit.
   // Кожен партнер шукає карту, яка вміщує ВЕСЬ його залишок; серед таких бере
   // НАЙМЕНШУ (best-fit — не займає даремно великі карти). Якщо жодна не вміщує —
@@ -251,6 +271,9 @@ async function runDistribution(){
       used[pick].add(j);
     }
   }
+
+  // повертаємо зарезервований надлишок — це і є залишок, сконцентрований на великих
+  for(let i=0;i<nP;i++) partnerBalances[i] += reserved[i];
 
   // Колонка C (погляд партнера) і D (погляд менеджера)
   const C = partnerNames.map((_,i)=>{
