@@ -60,11 +60,11 @@
 </head>
 <body>
   <main class="card">
-    <h1>Поділ сум по картах <span style="font-size:13px;color:var(--accent);font-weight:600">v18 · концентрація залишку</span></h1>
+    <h1>Поділ сум по картах <span style="font-size:13px;color:var(--accent);font-weight:600">v19 · мін/макс ліміти</span></h1>
     <p class="sub">Розкидає суми партнерів по картах зарплат у Google&nbsp;Таблиці.
-       Кожен партнер іде на <b>якнайменше карт</b> (більшість — на одну; великий —
-       на 2-3, best-fit). Надлишок грошей <b>концентрується на найбільших</b>
-       партнерах, а не розсипається по дрібних. <b>Без недоплат</b>.</p>
+       <b>Дрібні суми не діляться</b> (одна сума — одна карта); мінімум 25 грн на карту,
+       максимум 5 карт на партнера. Дробиться лише велика сума (гігант — на 2-3 карти).
+       Надлишок концентрується на найбільших. Крихти &lt;25 грн — мінімальна недоплата (L).</p>
 
     <label for="client">Google OAuth Client ID</label>
     <input id="client" placeholder="1234567890-xxxx.apps.googleusercontent.com">
@@ -195,7 +195,9 @@ async function runDistribution(){
   const matrix = Array.from({length:nP}, () => new Array(N).fill(0));
   const partnerBalances = partnerAmounts.slice();
 
-  const MIN_PAY = 25;                                  // мінімальний платіж на одну карту
+  const MIN_PAY = 25;                                  // мінімальний платіж на одну карту (ЖОРСТКО)
+  const MAX_CARDS = 5;                                 // жорсткий максимум карт на одного партнера
+  const NO_SPLIT_BELOW = 1000;                         // суми, менші за це, НЕ ділимо — лише цілком на 1 карту
   const used = Array.from({length:nP}, () => new Set()); // які карти вже використав партнер
 
   // Персональні правила
@@ -206,16 +208,17 @@ async function runDistribution(){
     if(r && r.prefix) return onlyDigits(cards[j]).startsWith(r.prefix);
     return true;
   };
-  // персональна стеля карт (Шашенко=1, Шульга=2), інакше без особистого обмеження
-  const personalCap = i => { const r = ruleFor(i); return (r && r.maxCards) ? r.maxCards : Infinity; };
+  // стеля карт партнера: персональна (Шашенко=1, Шульга=2), але не більше загального MAX_CARDS
+  const capOf = i => { const r = ruleFor(i); return Math.min((r && r.maxCards) ? r.maxCards : MAX_CARDS, MAX_CARDS); };
+  // чи можна ДРОБИТИ суму партнера між картами (лише великі/середні; дрібні — ні)
+  const canSplit = i => partnerAmounts[i] >= NO_SPLIT_BELOW;
 
   setStatus('<span class="spin"></span>Рахую розподіл…');
 
   // КОНЦЕНТРАЦІЯ ЗАЛИШКУ. Якщо сумарно грошей партнерів більше за потреби карт,
   // надлишок резервуємо на НАЙБІЛЬШИХ партнерах: вони й триматимуть залишок, а всі
-  // дрібні спорожнюються повністю. (Краще великий партнер із залишком, ніж десятки
-  // дрібних по копійці.) Зарезервоване не роздаємо в цьому запуску — повертаємо в
-  // баланс наприкінці, тож воно чесно показується як залишок саме на великих.
+  // дрібні спорожнюються повністю. Зарезервоване не роздаємо — повертаємо в баланс
+  // наприкінці, тож воно показується як залишок саме на великих.
   const reserved = new Array(nP).fill(0);
   {
     const totalNeed  = managerNeeds.reduce((a,b)=>a+b, 0);
@@ -229,46 +232,66 @@ async function runDistribution(){
     }
   }
 
-  // Розподіл як у старій версії, що ділила найкраще: ВЕЛИКІ ПЕРШІ + best-fit.
-  // Кожен партнер шукає карту, яка вміщує ВЕСЬ його залишок; серед таких бере
-  // НАЙМЕНШУ (best-fit — не займає даремно великі карти). Якщо жодна не вміщує —
-  // ллє все в НАЙБІЛЬШУ карту й одразу спорожнюється. Тому гігант іде на 2-3 великі
-  // карти, а не на 20 дрібних; більшість партнерів — узагалі на 1 карту.
+  // ГОЛОВНИЙ РОЗПОДІЛ: ВЕЛИКІ ПЕРШІ + best-fit ЦІЛИМИ.
+  // Кожен партнер намагається лягти ЦІЛКОМ на одну карту (best-fit — найменша карта,
+  // що вміщує весь його залишок). Якщо жодна не вміщує:
+  //   • велику/середню суму (>= NO_SPLIT_BELOW) ллємо в НАЙБІЛЬШУ карту (дозволяємо поділ);
+  //   • дрібну суму НЕ ділимо — лишаємо як залишок (нижче спробуємо покласти цілком).
+  // Кожен платіж >= MIN_PAY, карт на партнера <= capOf.
   const order = [...Array(nP).keys()].sort((a,b)=>partnerBalances[b]-partnerBalances[a]); // великі перші
   for(const i of order){
-    const cap = personalCap(i);
-    while(partnerBalances[i] >= MIN_PAY){
+    const cap = capOf(i);
+    while(partnerBalances[i] >= MIN_PAY && used[i].size < cap){
       let open = [];
       for(let j=0;j<N;j++) if(managerNeeds[j] >= MIN_PAY && cardAllowedFor(i, j)) open.push(j);
-      if(used[i].size >= cap) open = open.filter(j => used[i].has(j)); // персональна стеля карт
       if(!open.length) break;
       const fit = open.filter(j => managerNeeds[j] >= partnerBalances[i]); // карта вміщує весь залишок
-      let j;
-      if(fit.length) j = fit.reduce((m,x)=> managerNeeds[x] < managerNeeds[m] ? x : m, fit[0]);   // best-fit: найменша така
-      else           j = open.reduce((m,x)=> managerNeeds[x] > managerNeeds[m] ? x : m, open[0]); // інакше — найбільша карта
-      const pay = Math.min(partnerBalances[i], managerNeeds[j]);
-      if(pay < MIN_PAY) break;
-      matrix[i][j] += pay; partnerBalances[i] -= pay; managerNeeds[j] -= pay;
-      used[i].add(j);
+      if(fit.length){
+        const j = fit.reduce((m,x)=> managerNeeds[x] < managerNeeds[m] ? x : m, fit[0]); // best-fit: найменша така
+        matrix[i][j] += partnerBalances[i]; managerNeeds[j] -= partnerBalances[i]; used[i].add(j); partnerBalances[i] = 0;
+      } else if(canSplit(i)){
+        const j = open.reduce((m,x)=> managerNeeds[x] > managerNeeds[m] ? x : m, open[0]); // найбільша карта
+        const pay = Math.min(partnerBalances[i], managerNeeds[j]);
+        if(pay < MIN_PAY) break;
+        matrix[i][j] += pay; partnerBalances[i] -= pay; managerNeeds[j] -= pay; used[i].add(j);
+      } else break; // дрібну суму не дробимо
     }
   }
 
-  // БЕЗ НЕДОПЛАТ: добиваємо незакриті карти (зокрема дрібні залишки <25). Карти
-  // беремо від найбільшої незакритої потреби, гроші — з найбільшого залишку.
-  // personalCap у силі (Шашенко=1, Шульга=2), тож понад норму карт виходить лише
-  // в найбільших партнерів — рівно щоб не лишити недоплат.
+  // ДОБИВАННЯ-1 (тільки ЦІЛКОМ): партнерів, що ще мають залишок, кладемо повністю на
+  // карту, чия потреба вміщує весь їхній залишок (best-fit карткою). Так дрібні суми
+  // теж потрапляють на карту, але НЕ діляться.
+  let placed = true;
+  while(placed){
+    placed = false;
+    const rest = [...Array(nP).keys()].filter(i => partnerBalances[i] >= MIN_PAY && used[i].size < capOf(i))
+                                       .sort((a,b)=>partnerBalances[b]-partnerBalances[a]);
+    for(const i of rest){
+      let cand = [];
+      for(let j=0;j<N;j++) if(managerNeeds[j] >= partnerBalances[i] && managerNeeds[j] >= MIN_PAY && cardAllowedFor(i, j)) cand.push(j);
+      if(!cand.length) continue;
+      const j = cand.reduce((m,x)=> managerNeeds[x] < managerNeeds[m] ? x : m, cand[0]);
+      matrix[i][j] += partnerBalances[i]; managerNeeds[j] -= partnerBalances[i]; used[i].add(j); partnerBalances[i] = 0;
+      placed = true;
+    }
+  }
+
+  // ДОБИВАННЯ-2 (частково, ЛИШЕ великі/середні): закриваємо ще незаповнені карти
+  // великими залишками. Карти — від найбільшої потреби; кожен платіж >= MIN_PAY.
+  // Дрібних сум не чіпаємо (не ділимо). Карти з потребою < MIN_PAY лишаємо (крихти →
+  // це і є мінімальна недоплата, яку видно у стовпці L та лозі).
   const cardOrder = [...Array(N).keys()].sort((a,b)=>managerNeeds[b]-managerNeeds[a]);
   for(const j of cardOrder){
-    while(managerNeeds[j] >= 1){
+    while(managerNeeds[j] >= MIN_PAY){
       let pick = -1;
       for(let i=0;i<nP;i++){
-        if(used[i].size >= personalCap(i) && !used[i].has(j)) continue; // персональна стеля карт
-        if(partnerBalances[i] >= 1 && cardAllowedFor(i, j) && (pick < 0 || partnerBalances[i] > partnerBalances[pick])) pick = i;
+        if(used[i].size >= capOf(i) && !used[i].has(j)) continue; // жорстка стеля карт
+        if(partnerBalances[i] >= MIN_PAY && canSplit(i) && cardAllowedFor(i, j) && (pick < 0 || partnerBalances[i] > partnerBalances[pick])) pick = i;
       }
-      if(pick < 0) break; // грошей у партнерів більше немає
+      if(pick < 0) break;
       const pay = Math.min(managerNeeds[j], partnerBalances[pick]);
-      matrix[pick][j] += pay; partnerBalances[pick] -= pay; managerNeeds[j] -= pay;
-      used[pick].add(j);
+      if(pay < MIN_PAY) break;
+      matrix[pick][j] += pay; partnerBalances[pick] -= pay; managerNeeds[j] -= pay; used[pick].add(j);
     }
   }
 
