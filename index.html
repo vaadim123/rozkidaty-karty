@@ -60,12 +60,11 @@
 </head>
 <body>
   <main class="card">
-    <h1>Поділ сум по картах <span style="font-size:13px;color:var(--accent);font-weight:600">v21 · як стара версія</span></h1>
+    <h1>Поділ сум по картах <span style="font-size:13px;color:var(--accent);font-weight:600">v22 · великі few-cards</span></h1>
     <p class="sub">Розкидає суми партнерів по картах зарплат у Google&nbsp;Таблиці.
-       Логіка як у старій робочій програмі: по кожному менеджеру набираємо партнерів
-       у порядку списку, <b>не більше 4 партнерів на карту</b>; дрібний партнер лягає
-       на одну карту цілком. Правила: Шульга — тільки монобанк, <b>1 карта на всю суму</b>;
-       Шашенко — <b>1 карта на всю суму</b>.</p>
+       Великі партнери — на 2-3 великі карти (best-fit), не збирають дрібні залишки.
+       Дрібні/середні — по-менеджерному, кожен на одну карту (≤4 партнери на карту).
+       Шульга — тільки монобанк, 1 карта; Шашенко — 1 карта на всю суму.</p>
 
     <label for="client">Google OAuth Client ID</label>
     <input id="client" placeholder="1234567890-xxxx.apps.googleusercontent.com">
@@ -197,6 +196,7 @@ async function runDistribution(){
   const partnerBalances = partnerAmounts.slice();
 
   const MAX_SOURCES = 4;                                 // не більше 4 партнерів на одного менеджера (карту)
+  const BIG_PARTNER = 5000;                              // від цієї суми партнера розкладаємо best-fit (few cards)
   const used = Array.from({length:nP}, () => new Set()); // які карти вже використав партнер
   const managerSources = Array.from({length:N}, () => new Set()); // які партнери платять у цю карту
 
@@ -234,17 +234,38 @@ async function runDistribution(){
     }
   }
 
-  // РОЗПОДІЛ як у старій робочій програмі: по-МЕНЕДЖЕРНО.
-  // Для кожного менеджера (карти) йдемо партнерами В ПОРЯДКУ СПИСКУ; кожен кладе
-  // min(потреба, свій баланс), поки карта не закриється або не набереться 4 партнери.
-  // Дрібний партнер повністю лягає в першу-ліпшу карту (одна карта) — не дробиться.
+  // ВЕЛИКІ ПАРТНЕРИ (>= BIG_PARTNER) — спершу, best-fit, великі перші.
+  // Кожен кладе всю суму на НАЙМЕНШУ карту, що її вміщує (1 карта); якщо жодна не
+  // вміщує — ллє в НАЙБІЛЬШУ й переходить далі. Тому гігант іде на 2-3 великі карти,
+  // а не збирає десятки дрібних залишків (як було в чисто менеджерному підході).
+  const bigOrder = [...Array(nP).keys()]
+    .filter(i => !ruleFor(i) && partnerAmounts[i] >= BIG_PARTNER)
+    .sort((a,b)=>partnerBalances[b]-partnerBalances[a]);
+  for(const i of bigOrder){
+    while(partnerBalances[i] >= 1){
+      let open = [];
+      for(let j=0;j<N;j++)
+        if(managerNeeds[j] > 0 && cardAllowedFor(i, j) && (managerSources[j].size < MAX_SOURCES || managerSources[j].has(i))) open.push(j);
+      if(!open.length) break;
+      const fit = open.filter(j => managerNeeds[j] >= partnerBalances[i]); // карта вміщує весь залишок
+      const j = fit.length ? fit.reduce((m,x)=> managerNeeds[x] < managerNeeds[m] ? x : m, fit[0])   // best-fit
+                           : open.reduce((m,x)=> managerNeeds[x] > managerNeeds[m] ? x : m, open[0]); // найбільша
+      const pay = Math.min(partnerBalances[i], managerNeeds[j]);
+      matrix[i][j] += pay; managerNeeds[j] -= pay; partnerBalances[i] -= pay;
+      managerSources[j].add(i); used[i].add(j);
+    }
+  }
+
+  // РЕШТА (дрібні/середні < BIG_PARTNER) — по-МЕНЕДЖЕРНО, як у старій робочій програмі.
+  // Для кожного менеджера йдемо партнерами В ПОРЯДКУ СПИСКУ; кожен кладе min(потреба,
+  // баланс), ≤4 партнери на карту. Дрібний партнер повністю лягає в першу-ліпшу карту.
   for(let j=0;j<N;j++){
     for(let i=0;i<nP;i++){
       if(managerNeeds[j] <= 0) break;
       if(partnerBalances[i] <= 0) continue;
-      if(!cardAllowedFor(i, j)) continue;                                     // Шульга — тільки монобанк
+      if(partnerAmounts[i] >= BIG_PARTNER || ruleFor(i)) continue;             // великі/правила вже розкладені
+      if(!cardAllowedFor(i, j)) continue;
       if(managerSources[j].size >= MAX_SOURCES && !managerSources[j].has(i)) continue; // ≤4 партнери на карту
-      if(used[i].size >= personalCap(i) && !used[i].has(j)) continue;         // Шашенко ≤1, Шульга ≤2 карти
       const pay = Math.min(managerNeeds[j], partnerBalances[i]);
       if(pay < 1) continue;
       matrix[i][j] += pay; managerNeeds[j] -= pay; partnerBalances[i] -= pay;
