@@ -60,7 +60,7 @@
 </head>
 <body>
   <main class="card">
-    <h1>Поділ сум по картах <span style="font-size:13px;color:var(--accent);font-weight:600">v27 · як SUM</span></h1>
+    <h1>Поділ сум по картах <span style="font-size:13px;color:var(--accent);font-weight:600">v28 · без хвостиків</span></h1>
     <p class="sub">Розкидає суми партнерів по картах зарплат у Google&nbsp;Таблиці.
        Кожен партнер на мінімум карт. <b>Надлишок</b> грошей сідає на кількох найбільших
        партнерах; якщо грошей бракує — <b>недоплата</b> сідає на кількох найбільших
@@ -274,16 +274,23 @@ async function runDistribution(){
   //    Беремо карти від НАЙБІЛЬШОЇ потреби; кожну заповнюємо, щоразу беручи партнера
   //    з НАЙБІЛЬШИМ балансом. Так великі партнери закривають великі карти небагатьма
   //    великими платежами (мало карт на партнера), а дрібні лягають на дрібні карти.
+  const MIN_PAY = 25; // не лишаємо партнеру дрібний «хвостик» (щоб не було карт по 2 грн)
   const cardOrder = [...Array(N).keys()].sort((a,b)=>managerNeeds[b]-managerNeeds[a]);
   for(const j of cardOrder){
     while(managerNeeds[j] >= 1){
-      let pick = -1;
+      const n = managerNeeds[j];
+      let pick = -1, pickAny = -1;
       for(let i=0;i<nP;i++){
         if(partnerBalances[i] < 1 || !cardAllowedFor(i, j)) continue;
         if(ruleFor(i) && used[i].size >= personalCap(i) && !used[i].has(j)) continue; // Шашенко/Шульга — своя стеля
+        if(pickAny < 0 || partnerBalances[i] > partnerBalances[pickAny]) pickAny = i; // найбільший узагалі
+        // уникаємо партнера, що лишиться з дрібним хвостиком (need < balance < need+MIN):
+        // саме через це виникали карти по кілька грн (напр. 34 + 2)
+        if(partnerBalances[i] > n && partnerBalances[i] < n + MIN_PAY) continue;
         if(pick < 0 || partnerBalances[i] > partnerBalances[pick]) pick = i;
       }
-      if(pick < 0) break; // грошей у партнерів більше немає (залишок потреби = дефіцит)
+      if(pick < 0) pick = pickAny; // якщо всі «в зоні хвостика» — беремо найбільший, аби не лишити недоплату
+      if(pick < 0) break;          // грошей у партнерів більше немає (залишок потреби = дефіцит)
       const pay = Math.min(managerNeeds[j], partnerBalances[pick]);
       matrix[pick][j] += pay; managerNeeds[j] -= pay; partnerBalances[pick] -= pay; used[pick].add(j);
     }
