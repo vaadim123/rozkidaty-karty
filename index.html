@@ -60,11 +60,11 @@
 </head>
 <body>
   <main class="card">
-    <h1>Поділ сум по картах <span style="font-size:13px;color:var(--accent);font-weight:600">v23 · без недоплат</span></h1>
+    <h1>Поділ сум по картах <span style="font-size:13px;color:var(--accent);font-weight:600">v24 · концентрація</span></h1>
     <p class="sub">Розкидає суми партнерів по картах зарплат у Google&nbsp;Таблиці.
-       Заповнює карти від найбільшої, щоразу з найбільшого партнера — <b>без недоплат</b>
-       (поки грошей вистачає), кожен партнер на мінімум карт. Надлишок концентрується
-       на найбільшому. Шашенко — 1 карта на всю суму; Шульга — 1 карта, лише монобанк.</p>
+       Кожен партнер на мінімум карт. <b>Надлишок</b> грошей сідає на кількох найбільших
+       партнерах; якщо грошей бракує — <b>недоплата</b> сідає на кількох найбільших
+       менеджерах (усі дрібні оплачені повністю). Шашенко/Шульга — 1 карта; Шульга — монобанк.</p>
 
     <label for="client">Google OAuth Client ID</label>
     <input id="client" placeholder="1234567890-xxxx.apps.googleusercontent.com">
@@ -210,19 +210,33 @@ async function runDistribution(){
 
   setStatus('<span class="spin"></span>Рахую розподіл…');
 
-  // 1) КОНЦЕНТРАЦІЯ ЗАЛИШКУ: якщо грошей більше за потреби карт, надлишок резервуємо
-  //    на НАЙБІЛЬШИХ звичайних партнерах — вони триматимуть залишок, решта повністю
-  //    йде на карти. (Краще один великий партнер із залишком, ніж десятки дрібних.)
-  const reserved = new Array(nP).fill(0);
+  // 1) КОНЦЕНТРАЦІЯ ЗАЛИШКУ / ДЕФІЦИТУ на НЕБАГАТЬОХ великих (симетрично):
+  //    • якщо грошей БІЛЬШЕ за потреби — надлишок резервуємо на найбільших ПАРТНЕРАХ
+  //      (залишок сяде на них, дрібні спорожняться повністю);
+  //    • якщо грошей МЕНШЕ — дефіцит резервуємо на найбільших МЕНЕДЖЕРАХ (недоплата
+  //      сяде на кількох великих, а всі дрібні менеджери отримають повну суму).
+  //    Зарезервоване повертаємо в кінці, тож воно й показується як залишок/недоплата.
+  const reserved     = new Array(nP).fill(0); // надлишок, зарезервований на партнерах
+  const reservedNeed = new Array(N).fill(0);  // дефіцит, зарезервований на менеджерах
   {
     const totalNeed  = managerNeeds.reduce((a,b)=>a+b, 0);
     const totalMoney = partnerBalances.reduce((a,b)=>a+b, 0);
-    let surplus = Math.max(0, totalMoney - totalNeed);
-    const bigFirst = [...Array(nP).keys()].filter(i => !ruleFor(i)).sort((a,b)=>partnerBalances[b]-partnerBalances[a]);
-    for(const i of bigFirst){
-      if(surplus < 1) break;
-      const r = Math.min(surplus, partnerBalances[i]);
-      reserved[i] = r; partnerBalances[i] -= r; surplus -= r;
+    if(totalMoney >= totalNeed){
+      let surplus = totalMoney - totalNeed;
+      const bigFirst = [...Array(nP).keys()].filter(i => !ruleFor(i)).sort((a,b)=>partnerBalances[b]-partnerBalances[a]);
+      for(const i of bigFirst){
+        if(surplus < 1) break;
+        const r = Math.min(surplus, partnerBalances[i]);
+        reserved[i] = r; partnerBalances[i] -= r; surplus -= r;
+      }
+    } else {
+      let deficit = totalNeed - totalMoney;
+      const bigMgr = [...Array(N).keys()].sort((a,b)=>managerNeeds[b]-managerNeeds[a]);
+      for(const j of bigMgr){
+        if(deficit < 1) break;
+        const r = Math.min(deficit, managerNeeds[j]);
+        reservedNeed[j] = r; managerNeeds[j] -= r; deficit -= r;
+      }
     }
   }
 
@@ -262,8 +276,10 @@ async function runDistribution(){
     }
   }
 
-  // повертаємо зарезервований надлишок — це залишок, сконцентрований на найбільших
+  // повертаємо зарезервоване: надлишок → залишок на найбільших партнерах;
+  // дефіцит → недоплата на найбільших менеджерах (дрібні лишились повністю оплачені)
   for(let i=0;i<nP;i++) partnerBalances[i] += reserved[i];
+  for(let j=0;j<N;j++) managerNeeds[j] += reservedNeed[j];
 
   // Колонка C (погляд партнера) і D (погляд менеджера)
   const C = partnerNames.map((_,i)=>{
