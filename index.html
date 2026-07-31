@@ -60,7 +60,7 @@
 </head>
 <body>
   <main class="card">
-    <h1>Поділ сум по картах <span style="font-size:13px;color:var(--accent);font-weight:600">v26 · картка обов'язкова</span></h1>
+    <h1>Поділ сум по картах <span style="font-size:13px;color:var(--accent);font-weight:600">v27 · як SUM</span></h1>
     <p class="sub">Розкидає суми партнерів по картах зарплат у Google&nbsp;Таблиці.
        Кожен партнер на мінімум карт. <b>Надлишок</b> грошей сідає на кількох найбільших
        партнерах; якщо грошей бракує — <b>недоплата</b> сідає на кількох найбільших
@@ -170,35 +170,35 @@ async function runDistribution(){
   await api("POST","/values:batchClear",{ranges:
     ["C2:C","D2:D","J6:J","K6:K","L6:L","M2:M","M3:M","M4:M","M5:M","M6:Z","A100:A"].map(q)});
 
-  // Читання колонок
-  const cols = ["A2:A","B2:B","E2:E","F2:F","G2:G","H2:H"];
-  const params = cols.map(c => `ranges=${encodeURIComponent(q(c))}`).join("&");
-  const got = await api("GET",`/values:batchGet?${params}`);
+  // Читання колонок. Текстові (імена, картки) — як текст; суми/потреби (B, E) —
+  // як ЧИСЛА напряму (UNFORMATTED_VALUE), щоб рахувати РІВНО як SUM у таблиці:
+  // текстово-форматовані клітинки SUM ігнорує (0), і ми теж — інакше виникала
+  // фальшива «недоплата» (я парсив число з тексту, а таблиця його не рахувала).
   const flat = vr => (vr && vr.values) ? vr.values.map(r => (r[0] ?? "")) : [];
-  const [A,B,E,F,G,H] = got.valueRanges.map(flat);
+  const textCols = ["A2:A","F2:F","G2:G","H2:H"];
+  const textGot = await api("GET",`/values:batchGet?${textCols.map(c=>`ranges=${encodeURIComponent(q(c))}`).join("&")}`);
+  const [A,F,G,H] = textGot.valueRanges.map(flat);
+  const numCols = ["B2:B","E2:E"];
+  const numGot = await api("GET",`/values:batchGet?${numCols.map(c=>`ranges=${encodeURIComponent(q(c))}`).join("&")}&valueRenderOption=UNFORMATTED_VALUE`);
+  const [B,E] = numGot.valueRanges.map(flat);
+  const num = x => (typeof x === "number" && isFinite(x)) ? x : 0; // тільки справжні числа (як SUM)
 
   const N = Math.max(F.length,E.length,G.length,H.length);
   const names=[], cards=[], sums=[];
   for(let i=0;i<N;i++){
-    const nm = (F[i] ?? "").toString().trim();
-    const g  = (G[i] || "").toString().trim();
-    const card = g ? g : (H[i] ? H[i].toString().trim() : "");
-    names.push(nm);
-    cards.push(card);
-    // Потребу рахуємо ЛИШЕ якщо в менеджера Є КАРТКА (без картки заплатити неможливо).
-    // Так випадкові рядки з іменами/числами нижче списку не роздувають суму потреб
-    // (саме через це виникала фальшива «недоплата» при реальному надлишку).
-    sums.push( card ? (E[i] ?? "") : "" );
+    names.push((F[i] ?? "").toString().trim());
+    const g = (G[i] || "").toString().trim();
+    cards.push(g ? g : (H[i] ? H[i].toString().trim() : ""));
+    sums.push(num(E[i])); // потреба = справжнє число з E (текстова клітинка → 0, як SUM)
   }
 
   const nP = Math.max(A.length, B.length);
   const partnerNames = [], partnerAmounts = [];
   for(let i=0;i<nP;i++){
-    const nm = (A[i] ?? "").toString().trim();
-    partnerNames.push(nm);
-    partnerAmounts.push(nm ? tryFloat(B[i]) : 0); // сума рахується лише для партнера з іменем
+    partnerNames.push((A[i] ?? "").toString().trim());
+    partnerAmounts.push(num(B[i])); // сума = справжнє число з B (текстова клітинка → 0)
   }
-  const managerNeeds = sums.map(tryFloat);
+  const managerNeeds = sums.slice();
 
   // Загальні суми (до розподілу) — для звіту й перевірки: партнери vs менеджери
   const totalPartnerMoney = partnerAmounts.reduce((a,b)=>a+b, 0);
@@ -333,7 +333,7 @@ async function runDistribution(){
     {range:q(`M6:${last}${5+nP}`), values: out.length?out:[[]]},
     {range:q(`M2:${last}2`), values:[cards]},
     {range:q(`M3:${last}3`), values:[names]},
-    {range:q(`M4:${last}4`), values:[sums.map(tryFloat)]},
+    {range:q(`M4:${last}4`), values:[sums]},
     {range:q(`M5:${last}5`), values:[m5]},
     {range:q(`J6:J${5+nP}`), values: partnerNames.map(p=>[p])},
     {range:q(`K6:K${5+nP}`), values: partnerAmounts.map(x=>[Math.round(x)])},
