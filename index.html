@@ -60,7 +60,7 @@
 </head>
 <body>
   <main class="card">
-    <h1>Поділ сум по картах <span style="font-size:13px;color:var(--accent);font-weight:600">v25 · фікс сум</span></h1>
+    <h1>Поділ сум по картах <span style="font-size:13px;color:var(--accent);font-weight:600">v26 · картка обов'язкова</span></h1>
     <p class="sub">Розкидає суми партнерів по картах зарплат у Google&nbsp;Таблиці.
        Кожен партнер на мінімум карт. <b>Надлишок</b> грошей сідає на кількох найбільших
        партнерах; якщо грошей бракує — <b>недоплата</b> сідає на кількох найбільших
@@ -185,10 +185,10 @@ async function runDistribution(){
     const card = g ? g : (H[i] ? H[i].toString().trim() : "");
     names.push(nm);
     cards.push(card);
-    // Потребу рахуємо ЛИШЕ для реального менеджера (є ім'я АБО картка). Інакше 0 —
-    // щоб випадкові числа в стовпці E нижче списку менеджерів не роздували суму потреб
+    // Потребу рахуємо ЛИШЕ якщо в менеджера Є КАРТКА (без картки заплатити неможливо).
+    // Так випадкові рядки з іменами/числами нижче списку не роздувають суму потреб
     // (саме через це виникала фальшива «недоплата» при реальному надлишку).
-    sums.push( (nm || card) ? (E[i] ?? "") : "" );
+    sums.push( card ? (E[i] ?? "") : "" );
   }
 
   const nP = Math.max(A.length, B.length);
@@ -314,8 +314,10 @@ async function runDistribution(){
 
   // Лог
   const diff = totalPartnerMoney - totalManagerNeed;
+  const mgrCount = cards.filter(c => c).length;                 // менеджерів з карткою
+  const prtCount = partnerNames.filter(n => n).length;          // партнерів з іменем
   const log = [`Останній запуск: ${nowStr()}`];
-  log.push(`Партнери всього: ${Math.round(totalPartnerMoney)} грн | Менеджери всього: ${Math.round(totalManagerNeed)} грн`);
+  log.push(`Партнери: ${prtCount} на ${Math.round(totalPartnerMoney)} грн | Менеджери: ${mgrCount} на ${Math.round(totalManagerNeed)} грн`);
   log.push(diff >= 0 ? `➕ Надлишок грошей: ${Math.round(diff)} грн` : `➖ Дефіцит грошей: ${Math.round(-diff)} грн`);
   log.push("===== 🟠 Менеджери з недоплатою =====");
   let miss=0; names.forEach((n,i)=>{ if(managerNeeds[i]>0){log.push(`${n}: ${Math.round(managerNeeds[i])} грн`); miss++;} });
