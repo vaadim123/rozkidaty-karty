@@ -60,7 +60,7 @@
 </head>
 <body>
   <main class="card">
-    <h1>Поділ сум по картах <span style="font-size:13px;color:var(--accent);font-weight:600">v24 · концентрація</span></h1>
+    <h1>Поділ сум по картах <span style="font-size:13px;color:var(--accent);font-weight:600">v25 · фікс сум</span></h1>
     <p class="sub">Розкидає суми партнерів по картах зарплат у Google&nbsp;Таблиці.
        Кожен партнер на мінімум карт. <b>Надлишок</b> грошей сідає на кількох найбільших
        партнерах; якщо грошей бракує — <b>недоплата</b> сідає на кількох найбільших
@@ -180,16 +180,29 @@ async function runDistribution(){
   const N = Math.max(F.length,E.length,G.length,H.length);
   const names=[], cards=[], sums=[];
   for(let i=0;i<N;i++){
-    names.push(F[i] ?? "");
-    sums.push(E[i] ?? "");
-    const g=(G[i]||"").toString().trim();
-    cards.push(g ? g : (H[i] ? H[i].toString().trim() : ""));
+    const nm = (F[i] ?? "").toString().trim();
+    const g  = (G[i] || "").toString().trim();
+    const card = g ? g : (H[i] ? H[i].toString().trim() : "");
+    names.push(nm);
+    cards.push(card);
+    // Потребу рахуємо ЛИШЕ для реального менеджера (є ім'я АБО картка). Інакше 0 —
+    // щоб випадкові числа в стовпці E нижче списку менеджерів не роздували суму потреб
+    // (саме через це виникала фальшива «недоплата» при реальному надлишку).
+    sums.push( (nm || card) ? (E[i] ?? "") : "" );
   }
 
   const nP = Math.max(A.length, B.length);
   const partnerNames = [], partnerAmounts = [];
-  for(let i=0;i<nP;i++){ partnerNames.push(A[i] ?? ""); partnerAmounts.push(tryFloat(B[i])); }
+  for(let i=0;i<nP;i++){
+    const nm = (A[i] ?? "").toString().trim();
+    partnerNames.push(nm);
+    partnerAmounts.push(nm ? tryFloat(B[i]) : 0); // сума рахується лише для партнера з іменем
+  }
   const managerNeeds = sums.map(tryFloat);
+
+  // Загальні суми (до розподілу) — для звіту й перевірки: партнери vs менеджери
+  const totalPartnerMoney = partnerAmounts.reduce((a,b)=>a+b, 0);
+  const totalManagerNeed  = managerNeeds.reduce((a,b)=>a+b, 0);
 
   // Матриця
   const matrix = Array.from({length:nP}, () => new Array(N).fill(0));
@@ -300,7 +313,11 @@ async function runDistribution(){
   const Lf = Array.from({length:nP}, (_,k)=>{const r=6+k; return [`=K${r}-SUM(M${r}:${last}${r})`];});
 
   // Лог
-  const log = [`Останній запуск: ${nowStr()}`, "===== 🟠 Менеджери з недоплатою ====="];
+  const diff = totalPartnerMoney - totalManagerNeed;
+  const log = [`Останній запуск: ${nowStr()}`];
+  log.push(`Партнери всього: ${Math.round(totalPartnerMoney)} грн | Менеджери всього: ${Math.round(totalManagerNeed)} грн`);
+  log.push(diff >= 0 ? `➕ Надлишок грошей: ${Math.round(diff)} грн` : `➖ Дефіцит грошей: ${Math.round(-diff)} грн`);
+  log.push("===== 🟠 Менеджери з недоплатою =====");
   let miss=0; names.forEach((n,i)=>{ if(managerNeeds[i]>0){log.push(`${n}: ${Math.round(managerNeeds[i])} грн`); miss++;} });
   log.push("===== 🔵 Партнери з залишком =====");
   let bal=0; partnerNames.forEach((n,i)=>{ if(partnerBalances[i]>0){log.push(`${n}: ${Math.round(partnerBalances[i])} грн`); bal++;} });
