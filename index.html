@@ -60,7 +60,7 @@
 </head>
 <body>
   <main class="card">
-    <h1>Поділ сум по картах <span style="font-size:13px;color:var(--accent);font-weight:600">v29 · ≤4 на карту</span></h1>
+    <h1>Поділ сум по картах <span style="font-size:13px;color:var(--accent);font-weight:600">v30 · ≤4, добивка залишків</span></h1>
     <p class="sub">Розкидає суми партнерів по картах зарплат у Google&nbsp;Таблиці.
        Кожен партнер на мінімум карт. <b>Надлишок</b> грошей сідає на кількох найбільших
        партнерах; якщо грошей бракує — <b>недоплата</b> сідає на кількох найбільших
@@ -297,6 +297,28 @@ async function runDistribution(){
       const pay = Math.min(managerNeeds[j], partnerBalances[pick]);
       matrix[pick][j] += pay; managerNeeds[j] -= pay; partnerBalances[pick] -= pay;
       used[pick].add(j); managerSources[j].add(pick);
+    }
+  }
+
+  // 4) ДОБИВАННЯ БЕЗ ЛІМІТУ: якщо десь лишилась недоплата, а в партнерів ще є гроші —
+  //    закриваємо її рештою партнерів, ПЕРЕВИЩУЮЧИ ≤4 (краще менеджер із 5-6 дрібними
+  //    платежами, ніж і недоплата, і залишок дрібних партнерів водночас). Так дрібні
+  //    залишки йдуть на недозакриті карти, а не висять; лишається тільки справжній надлишок.
+  for(const j of cardOrder){
+    while(managerNeeds[j] >= 1){
+      const n = managerNeeds[j];
+      let pick = -1, pickAny = -1;
+      for(let i=0;i<nP;i++){
+        if(partnerBalances[i] < 1 || !cardAllowedFor(i, j)) continue;
+        if(ruleFor(i) && used[i].size >= personalCap(i) && !used[i].has(j)) continue;
+        if(pickAny < 0 || partnerBalances[i] > partnerBalances[pickAny]) pickAny = i;
+        if(partnerBalances[i] > n && partnerBalances[i] < n + MIN_PAY) continue; // без дрібного хвостика
+        if(pick < 0 || partnerBalances[i] > partnerBalances[pick]) pick = i;
+      }
+      if(pick < 0) pick = pickAny;
+      if(pick < 0) break; // грошей у партнерів більше немає (залишок потреби = справжній дефіцит)
+      const pay = Math.min(managerNeeds[j], partnerBalances[pick]);
+      matrix[pick][j] += pay; managerNeeds[j] -= pay; partnerBalances[pick] -= pay; used[pick].add(j);
     }
   }
 
