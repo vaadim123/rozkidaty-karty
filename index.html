@@ -60,7 +60,7 @@
 </head>
 <body>
   <main class="card">
-    <h1>Поділ сум по картах <span style="font-size:13px;color:var(--accent);font-weight:600">v36 · ≤4 карти, залишок на одному</span></h1>
+    <h1>Поділ сум по картах <span style="font-size:13px;color:var(--accent);font-weight:600">v37 · зайві карти на одному</span></h1>
     <p class="sub">Розкидає суми партнерів по картах зарплат у Google&nbsp;Таблиці.
        Кожен партнер на мінімум карт. <b>Надлишок</b> грошей сідає на кількох найбільших
        партнерах; якщо грошей бракує — <b>недоплата</b> сідає на кількох найбільших
@@ -319,11 +319,18 @@ async function runDistribution(){
           if(partnerBalances[i] < MIN_PAY || !cardAllowedFor(i, j) || !used[i].has(j)) continue;
           if(pick < 0 || partnerBalances[i] > partnerBalances[pick]) pick = i;
         }
-        if(pick < 0){                                            // 2) інакше — хто платить найменше карт
+        if(pick < 0){                                            // 2) інакше — КОНЦЕНТРУЄМО перевищення
+          // Неминучі зайві карти звалюємо на ОДНОГО (спершу того, хто вже >4; далі — хто вже
+          // має найбільше карт; тайбрейк — найбільший баланс), щоб решта лишалися ≤4. Так само,
+          // як залишок сідає на одну людину, а не розсипається (краще 1 на багато, ніж багато по трохи).
           for(let i=0;i<nP;i++){
             if(partnerBalances[i] < MIN_PAY || !cardAllowedFor(i, j)) continue;
             if(used[i].size >= capFor(i, Infinity) && !used[i].has(j)) continue; // поважаємо персональні (Шашенко/Шульга=1)
-            if(pick < 0 || used[i].size < used[pick].size ||
+            if(pick < 0){ pick = i; continue; }
+            const over = used[i].size > MAX_CARDS_PP, pOver = used[pick].size > MAX_CARDS_PP;
+            if(over && !pOver){ pick = i; continue; }   // той, хто вже понад ліміт — добиваємо його
+            if(!over && pOver) continue;
+            if(used[i].size > used[pick].size ||
                (used[i].size === used[pick].size && partnerBalances[i] > partnerBalances[pick])) pick = i;
           }
         }
