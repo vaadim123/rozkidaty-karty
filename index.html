@@ -60,7 +60,7 @@
 </head>
 <body>
   <main class="card">
-    <h1>Поділ сум по картах <span style="font-size:13px;color:var(--accent);font-weight:600">v32 · ≤4 карти на людину</span></h1>
+    <h1>Поділ сум по картах <span style="font-size:13px;color:var(--accent);font-weight:600">v33 · добивка з надлишку</span></h1>
     <p class="sub">Розкидає суми партнерів по картах зарплат у Google&nbsp;Таблиці.
        Кожен партнер на мінімум карт. <b>Надлишок</b> грошей сідає на кількох найбільших
        партнерах; якщо грошей бракує — <b>недоплата</b> сідає на кількох найбільших
@@ -284,29 +284,36 @@ async function runDistribution(){
   // одну карту — НЕ обмежуємо (менеджер може мати кількох дрібних платників — це краще,
   // ніж лишати гроші висіти залишком).
   const cardOrder = [...Array(N).keys()].sort((a,b)=>managerNeeds[b]-managerNeeds[a]);
-  for(const j of cardOrder){
-    while(managerNeeds[j] >= MIN_PAY){        // кожен платіж >= 25 грн (жодних карт по 2 грн)
-      const n = managerNeeds[j];
-      let pick = -1, pickAny = -1;
-      for(let i=0;i<nP;i++){
-        if(partnerBalances[i] < MIN_PAY || !cardAllowedFor(i, j)) continue;
-        if(used[i].size >= cardCapOf(i) && !used[i].has(j)) continue; // ≤4 карти на партнера (Шашенко/Шульга — 1)
-        if(pickAny < 0 || partnerBalances[i] > partnerBalances[pickAny]) pickAny = i; // найбільший узагалі
-        // уникаємо партнера, що лишиться з дрібним хвостиком (need < balance < need+MIN) —
-        // щоб не було карт по кілька грн (напр. 34 + 2)
-        if(partnerBalances[i] > n && partnerBalances[i] < n + MIN_PAY) continue;
-        if(pick < 0 || partnerBalances[i] > partnerBalances[pick]) pick = i;
+  const fillCards = () => {
+    for(const j of cardOrder){
+      while(managerNeeds[j] >= MIN_PAY){        // кожен платіж >= 25 грн (жодних карт по 2 грн)
+        const n = managerNeeds[j];
+        let pick = -1, pickAny = -1;
+        for(let i=0;i<nP;i++){
+          if(partnerBalances[i] < MIN_PAY || !cardAllowedFor(i, j)) continue;
+          if(used[i].size >= cardCapOf(i) && !used[i].has(j)) continue; // ≤4 карти на партнера (Шашенко/Шульга — 1)
+          if(pickAny < 0 || partnerBalances[i] > partnerBalances[pickAny]) pickAny = i; // найбільший узагалі
+          // уникаємо партнера, що лишиться з дрібним хвостиком (need < balance < need+MIN) —
+          // щоб не було карт по кілька грн (напр. 34 + 2)
+          if(partnerBalances[i] > n && partnerBalances[i] < n + MIN_PAY) continue;
+          if(pick < 0 || partnerBalances[i] > partnerBalances[pick]) pick = i;
+        }
+        if(pick < 0) pick = pickAny; // якщо всі «в зоні хвостика» — беремо найбільший
+        if(pick < 0) break;          // немає партнера в межах ≤4 карт / грошей — решта = недоплата
+        const pay = Math.min(managerNeeds[j], partnerBalances[pick]);
+        matrix[pick][j] += pay; managerNeeds[j] -= pay; partnerBalances[pick] -= pay; used[pick].add(j);
       }
-      if(pick < 0) pick = pickAny; // якщо всі «в зоні хвостика» — беремо найбільший
-      if(pick < 0) break;          // немає партнера в межах ≤4 карт / грошей — решта = недоплата
-      const pay = Math.min(managerNeeds[j], partnerBalances[pick]);
-      matrix[pick][j] += pay; managerNeeds[j] -= pay; partnerBalances[pick] -= pay; used[pick].add(j);
     }
-  }
+  };
+  fillCards();                                   // основний розподіл (надлишок поки зарезервовано)
 
-  // повертаємо зарезервоване: надлишок → залишок на найбільших партнерах;
-  // дефіцит → недоплата на найбільших менеджерах (дрібні лишились повністю оплачені)
+  // Повертаємо зарезервований надлишок у баланси й ДОБИВАЄМО недоплату з наявних грошей:
+  // якщо десь лишилась недоплата, а хтось (напр. власник надлишку) має гроші й вільні
+  // картки (≤4) — закриваємо нею. Так гроші не «висять», коли є кому й куди доплатити.
   for(let i=0;i<nP;i++) partnerBalances[i] += reserved[i];
+  fillCards();
+
+  // Дефіцит показуємо як недоплату на найбільших менеджерах (дрібні лишились оплачені)
   for(let j=0;j<N;j++) managerNeeds[j] += reservedNeed[j];
 
   // Колонка C (погляд партнера) і D (погляд менеджера)
