@@ -60,7 +60,7 @@
 </head>
 <body>
   <main class="card">
-    <h1>Поділ сум по картах <span style="font-size:13px;color:var(--accent);font-weight:600">v35 · залишок 5386 на одному</span></h1>
+    <h1>Поділ сум по картах <span style="font-size:13px;color:var(--accent);font-weight:600">v36 · ≤4 карти, залишок на одному</span></h1>
     <p class="sub">Розкидає суми партнерів по картах зарплат у Google&nbsp;Таблиці.
        Кожен партнер на мінімум карт. <b>Надлишок</b> грошей сідає на кількох найбільших
        партнерах; якщо грошей бракує — <b>недоплата</b> сідає на кількох найбільших
@@ -284,6 +284,8 @@ async function runDistribution(){
   // одну карту — НЕ обмежуємо (менеджер може мати кількох дрібних платників — це краще,
   // ніж лишати гроші висіти залишком).
   const cardOrder = [...Array(N).keys()].sort((a,b)=>managerNeeds[b]-managerNeeds[a]);
+  // Основний прохід: карта від найбільшої потреби; кожну закриваємо НАЙБІЛЬШИМ доступним
+  // партнером (великі закривають великі карти небагатьма платежами), у межах ≤4 карт.
   const fillCards = (cap) => {
     for(const j of cardOrder){
       while(managerNeeds[j] >= 1){              // закриваємо карту ПОВНІСТЮ (без крихт-недоплат)
@@ -305,10 +307,34 @@ async function runDistribution(){
       }
     }
   };
+  // ГАРАНТІЯ ПОКРИТТЯ з МІНІМУМОМ зайвих карт: для кожної відкритої карти спершу беремо
+  // партнера, що ВЖЕ на ній (доплата — БЕЗ нової карти); якщо нема — партнера з балансом
+  // і НАЙМЕНШОЮ кількістю карт (розкидаємо на тих, хто платить мало карт — «додати кожному
+  // ще по карті», а не пхати все на одного). Перевищуємо 4 лише там, де без цього застрягне.
+  const fillGuarantee = () => {
+    for(const j of cardOrder){
+      while(managerNeeds[j] >= 1){
+        let pick = -1;
+        for(let i=0;i<nP;i++){                                   // 1) уже на карті j → без нової карти
+          if(partnerBalances[i] < MIN_PAY || !cardAllowedFor(i, j) || !used[i].has(j)) continue;
+          if(pick < 0 || partnerBalances[i] > partnerBalances[pick]) pick = i;
+        }
+        if(pick < 0){                                            // 2) інакше — хто платить найменше карт
+          for(let i=0;i<nP;i++){
+            if(partnerBalances[i] < MIN_PAY || !cardAllowedFor(i, j)) continue;
+            if(used[i].size >= capFor(i, Infinity) && !used[i].has(j)) continue; // поважаємо персональні (Шашенко/Шульга=1)
+            if(pick < 0 || used[i].size < used[pick].size ||
+               (used[i].size === used[pick].size && partnerBalances[i] > partnerBalances[pick])) pick = i;
+          }
+        }
+        if(pick < 0) break;
+        const pay = Math.min(managerNeeds[j], partnerBalances[pick]);
+        matrix[pick][j] += pay; managerNeeds[j] -= pay; partnerBalances[pick] -= pay; used[pick].add(j);
+      }
+    }
+  };
   fillCards(MAX_CARDS_PP); // основний розподіл, ≤4 карти (надлишок поки відкладено)
-  // ГАРАНТІЯ ПОКРИТТЯ: добиваємо решту карт БЕЗ ліміту карт (перевищуємо 4 лише там, де
-  // без цього гроші застрягли б). Надлишок ще НЕ повернуто — тому покриваємо рівно T.
-  fillCards(Infinity);
+  fillGuarantee();         // добиваємо решту з мінімумом зайвих карт (надлишок ще НЕ повернуто → покриваємо рівно T)
 
   // Надлишок повертаємо у баланси НАПРИКІНЦІ — тому він лишається сконцентрованим на
   // одному найбільшому партнері (а не розтринькується під час добивання). Дефіцит —
@@ -345,6 +371,12 @@ async function runDistribution(){
   let miss=0; names.forEach((n,i)=>{ if(managerNeeds[i]>0){log.push(`${n}: ${Math.round(managerNeeds[i])} грн`); miss++;} });
   log.push("===== 🔵 Партнери з залишком =====");
   let bal=0; partnerNames.forEach((n,i)=>{ if(partnerBalances[i]>0){log.push(`${n}: ${Math.round(partnerBalances[i])} грн`); bal++;} });
+  // Скільки карт у кожного партнера + хто ПЕРЕВИЩИВ ліміт 4 (гарантія покриття) — чесно показуємо
+  const cardsUsed = i => { let u=0; for(let j=0;j<N;j++) if(matrix[i][j]>0) u++; return u; };
+  const over4 = [];
+  for(let i=0;i<nP;i++){ const u=cardsUsed(i); if(u>MAX_CARDS_PP) over4.push(`${partnerNames[i]}: ${u} карт`); }
+  log.push(`===== 🟣 Партнери понад ${MAX_CARDS_PP} картки: ${over4.length} =====`);
+  over4.forEach(s=>log.push(s));
   log.push(`===== ✅ Усього менеджерів з недоплатою: ${miss} =====`);
   log.push(`===== ✅ Усього партнерів з залишком: ${bal} =====`);
 
