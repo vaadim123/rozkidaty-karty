@@ -60,7 +60,7 @@
 </head>
 <body>
   <main class="card">
-    <h1>Поділ сум по картах <span style="font-size:13px;color:var(--accent);font-weight:600">v40 · мінімальний платіж 20 грн</span></h1>
+    <h1>Поділ сум по картах <span style="font-size:13px;color:var(--accent);font-weight:600">v41 · без копійок, залишок на одному</span></h1>
     <p class="sub">Розкидає суми партнерів по картах зарплат у Google&nbsp;Таблиці.
        Кожен партнер на мінімум карт. <b>Надлишок</b> грошей сідає на кількох найбільших
        партнерах; якщо грошей бракує — <b>недоплата</b> сідає на кількох найбільших
@@ -279,35 +279,39 @@ async function runDistribution(){
   const capFor = (i, cap) => Math.min(cap, personalCap(i)); // Шашенко/Шульга завжди 1
 
   const cardOrder = [...Array(N).keys()].sort((a,b)=>managerNeeds[b]-managerNeeds[a]);
-  // Основний прохід — ПАРТНЕР-ОРІЄНТОВАНИЙ (як роблять вручну, і виходить краще):
-  // великі партнери йдуть ПЕРШИМИ і кладуть ВЕЛИКІ шматки на НАЙБІЛЬШІ картки (worst-fit),
-  // у межах ≤4 карт. На ОСТАННІЙ дозволеній картці обираємо ту, що вміщує ВЕСЬ залишок
-  // цілком (best-fit) — щоб не лишити хвіст і не піти на 5-ту картку. Так великий партнер
-  // закриває кілька великих карт кількома великими платежами, а не розмазується по десятку
-  // дрібних (Шкромида 55822 → 3 картки, Мігалі 55740 → 4 по ~20к, а не 7–10 карток).
-  const fillPartners = () => {
+  // АБСОРБЕР — найдрібніша картка, яка збирає на себе всю «несходимість» (як роблять вручну:
+  // лишають 1 дрібного менеджера недоплаченим, а не розсипають копійки по всіх). Її НЕ
+  // заповнюємо у фазах 1–2, а наприкінці зливаємо в неї всі залишки партнерів. Тоді в лозі —
+  // 1 «крупний» рядок недоплати замість десятка копійчаних, і жодного платежу менше 20 грн.
+  let absorber = -1;
+  for(let j=0;j<N;j++){
+    if(!cards[j] || managerNeeds[j] < MIN_PAY) continue;   // тільки реальні непусті картки
+    if(absorber < 0 || managerNeeds[j] < managerNeeds[absorber]) absorber = j;
+  }
+  const openNonAbs = j => j !== absorber && managerNeeds[j] >= MIN_PAY;
+
+  // ФАЗА 1 — ПАРТНЕР-ОРІЄНТОВАНА: великі партнери першими, ВЕЛИКІ шматки на НАЙБІЛЬШІ картки
+  // (worst-fit), ≤4 карти. На останній картці — best-fit (вміщує весь залишок), щоб не лишати
+  // хвіст. Дрібні партнери кладуть УСЮ суму на одну картку (Шкромида 55822 → 3 картки, а не 7–10).
+  {
     const partnerOrder = [...Array(nP).keys()].sort((a,b)=>partnerBalances[b]-partnerBalances[a]);
     for(const i of partnerOrder){
       const cap = capFor(i, MAX_CARDS_PP);
       while(partnerBalances[i] >= MIN_PAY && used[i].size < cap){
-        const last = used[i].size === cap - 1;    // остання дозволена картка цього партнера
+        const last = used[i].size === cap - 1;
         let j = -1;
         if(last){
-          // best-fit: найменша дозволена картка, що вміщує ВЕСЬ залишок цілком
           for(let k=0;k<N;k++){
-            if(managerNeeds[k] < MIN_PAY || !cardAllowedFor(i, k)) continue;
+            if(!openNonAbs(k) || !cardAllowedFor(i, k)) continue;
             if(managerNeeds[k] >= partnerBalances[i] && (j < 0 || managerNeeds[k] < managerNeeds[j])) j = k;
           }
-          if(j < 0){ // ніде не вміщується цілком — беремо найбільшу (хвіст добере гарантія)
-            for(let k=0;k<N;k++){
-              if(managerNeeds[k] < MIN_PAY || !cardAllowedFor(i, k)) continue;
-              if(j < 0 || managerNeeds[k] > managerNeeds[j]) j = k;
-            }
+          if(j < 0) for(let k=0;k<N;k++){
+            if(!openNonAbs(k) || !cardAllowedFor(i, k)) continue;
+            if(j < 0 || managerNeeds[k] > managerNeeds[j]) j = k;
           }
         } else {
-          // worst-fit: найбільша потреба — великий шматок на велику картку
           for(let k=0;k<N;k++){
-            if(managerNeeds[k] < MIN_PAY || !cardAllowedFor(i, k)) continue;
+            if(!openNonAbs(k) || !cardAllowedFor(i, k)) continue;
             if(j < 0 || managerNeeds[k] > managerNeeds[j]) j = k;
           }
         }
@@ -316,45 +320,50 @@ async function runDistribution(){
         matrix[i][j] += pay; managerNeeds[j] -= pay; partnerBalances[i] -= pay; used[i].add(j);
       }
     }
-  };
-  // ГАРАНТІЯ ПОКРИТТЯ з МІНІМУМОМ зайвих карт: для кожної відкритої карти спершу беремо
-  // партнера, що ВЖЕ на ній (доплата — БЕЗ нової карти); якщо нема — партнера з балансом
-  // і НАЙМЕНШОЮ кількістю карт (розкидаємо на тих, хто платить мало карт — «додати кожному
-  // ще по карті», а не пхати все на одного). Перевищуємо 4 лише там, де без цього застрягне.
-  const fillGuarantee = () => {
-    for(const j of cardOrder){
-      while(managerNeeds[j] >= MIN_PAY){   // не робимо платежів менше 20 грн
-        let pick = -1;
-        for(let i=0;i<nP;i++){                                   // 1) уже на карті j → без нової карти
-          if(partnerBalances[i] < MIN_PAY || !cardAllowedFor(i, j) || !used[i].has(j)) continue;
-          if(pick < 0 || partnerBalances[i] > partnerBalances[pick]) pick = i;
-        }
-        if(pick < 0){                                            // 2) інакше — КОНЦЕНТРУЄМО перевищення
-          // Неминучі зайві карти звалюємо на ОДНОГО (спершу того, хто вже >4; далі — хто вже
-          // має найбільше карт; тайбрейк — найбільший баланс), щоб решта лишалися ≤4. Так само,
-          // як залишок сідає на одну людину, а не розсипається (краще 1 на багато, ніж багато по трохи).
-          for(let i=0;i<nP;i++){
-            if(partnerBalances[i] < MIN_PAY || !cardAllowedFor(i, j)) continue;
-            if(used[i].size >= capFor(i, Infinity) && !used[i].has(j)) continue; // поважаємо персональні (Шашенко/Шульга=1)
-            if(pick < 0){ pick = i; continue; }
-            const over = used[i].size > MAX_CARDS_PP, pOver = used[pick].size > MAX_CARDS_PP;
-            if(over && !pOver){ pick = i; continue; }   // той, хто вже понад ліміт — добиваємо його
-            if(!over && pOver) continue;
-            if(used[i].size > used[pick].size ||
-               (used[i].size === used[pick].size && partnerBalances[i] > partnerBalances[pick])) pick = i;
-          }
-        }
-        if(pick < 0) break;
-        const pay = Math.min(managerNeeds[j], partnerBalances[pick]);
-        matrix[pick][j] += pay; managerNeeds[j] -= pay; partnerBalances[pick] -= pay; used[pick].add(j);
+  }
+
+  // ФАЗА 2 — ГАРАНТІЯ (без абсорбера): добиваємо картки платежами ≥20, спершу партнером, що вже
+  // на картці (без нової картки); інакше — з найменшою кількістю карт.
+  for(const j of cardOrder){
+    if(j === absorber) continue;
+    while(managerNeeds[j] >= MIN_PAY){
+      let pick = -1;
+      for(let i=0;i<nP;i++){
+        if(partnerBalances[i] < MIN_PAY || !cardAllowedFor(i, j) || !used[i].has(j)) continue;
+        if(pick < 0 || partnerBalances[i] > partnerBalances[pick]) pick = i;
       }
+      if(pick < 0){
+        for(let i=0;i<nP;i++){
+          if(partnerBalances[i] < MIN_PAY || !cardAllowedFor(i, j)) continue;
+          if(used[i].size >= capFor(i, Infinity) && !used[i].has(j)) continue; // персональні (Шашенко/Шульга=1)
+          if(pick < 0 || used[i].size < used[pick].size ||
+             (used[i].size === used[pick].size && partnerBalances[i] > partnerBalances[pick])) pick = i;
+        }
+      }
+      if(pick < 0) break;
+      const pay = Math.min(managerNeeds[j], partnerBalances[pick]);
+      matrix[pick][j] += pay; managerNeeds[j] -= pay; partnerBalances[pick] -= pay; used[pick].add(j);
     }
-  };
-  // ПРАВИЛО: жодного платежу менше 20 грн (MIN_PAY). Тому невелика «остача», яку не можна
-  // розбити на платежі ≥20 (на цих даних ~80 грн), лишається як дрібний залишок/недоплата —
-  // це неминуче з правилом мін-20 (не можна відправити 3–19 грн окремим платежем).
-  fillPartners();  // основний партнер-орієнтований розподіл (великі шматки на великі картки, ≤4)
-  fillGuarantee(); // добиваємо решту платежами ≥20 грн (надлишок ще відкладено)
+  }
+
+  // ФАЗА 3 — ЗЛИВ ЗАЛИШКІВ В АБСОРБЕР: щоб у партнерів (крім тримача надлишку) НЕ лишалось копійок.
+  // Кожен залишок → в абсорбер (мерджимо, якщо партнер уже на ньому; або нова картка, якщо є місце
+  // і сума ≥20). Якщо ніяк (4 картки, не на абсорбері) — вливаємо у ВЛАСНУ найбільшу картку (той
+  // менеджер отримає на кілька грн більше — це не показується в лозі). Так уся несходимість сідає
+  // на абсорбер одним рядком, а не розсипом копійок.
+  if(absorber >= 0) for(let i=0;i<nP;i++){
+    // Надлишок (reserved) тримається ОКРЕМО і сюди не входить — тож зливаємо весь РОЗПОДІЛЮВАНИЙ
+    // залишок будь-якого партнера, а зарезервований надлишок лишається на ньому недоторканим.
+    const L = partnerBalances[i];
+    if(L < 1) continue;
+    if(cardAllowedFor(i, absorber) && (used[i].has(absorber) || (L >= MIN_PAY && used[i].size < capFor(i, MAX_CARDS_PP)))){
+      matrix[i][absorber] += L; managerNeeds[absorber] -= L; partnerBalances[i] -= L; used[i].add(absorber);
+    } else {
+      let jb = -1;
+      for(let j=0;j<N;j++) if(matrix[i][j] > 0 && (jb < 0 || matrix[i][j] > matrix[i][jb])) jb = j;
+      if(jb >= 0){ matrix[i][jb] += L; managerNeeds[jb] -= L; partnerBalances[i] -= L; }
+    }
+  }
 
   // Надлишок повертаємо у баланси НАПРИКІНЦІ — тому він лишається сконцентрованим на
   // одному найбільшому партнері (а не розтринькується під час добивання). Дефіцит —
