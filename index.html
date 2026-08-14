@@ -60,7 +60,7 @@
 </head>
 <body>
   <main class="card">
-    <h1>Поділ сум по картах <span style="font-size:13px;color:var(--accent);font-weight:600">v38 · великі шматки, ≤4 картки</span></h1>
+    <h1>Поділ сум по картах <span style="font-size:13px;color:var(--accent);font-weight:600">v39 · рівний рахунок, без копійок</span></h1>
     <p class="sub">Розкидає суми партнерів по картах зарплат у Google&nbsp;Таблиці.
        Кожен партнер на мінімум карт. <b>Надлишок</b> грошей сідає на кількох найбільших
        партнерах; якщо грошей бракує — <b>недоплата</b> сідає на кількох найбільших
@@ -350,8 +350,35 @@ async function runDistribution(){
       }
     }
   };
+  // ТОЧНЕ ЗАКРИТТЯ КОПІЙОК — щоб усе рахувалось РІВНО (без залишків по 3–20 грн і без
+  // недоплат по кілька грн, які «ніхто не докидатиме»). Ігноруємо поріг MIN_PAY: кожну
+  // недозакриту картку добиваємо цілком, СПЕРШУ партнером, що ВЖЕ на ній (доплата без нової
+  // картки), інакше будь-яким партнером із залишком. Надлишок (5386) відкладено — його НЕ
+  // чіпаємо, тож після цього проходу в партнерів 0 залишку, крім одного з надлишком.
+  const fillExact = () => {
+    for(const j of cardOrder){
+      while(managerNeeds[j] >= 0.5){
+        let pick = -1;
+        for(let i=0;i<nP;i++){                                   // 1) уже на карті j → без нової картки
+          if(partnerBalances[i] <= 0 || !cardAllowedFor(i, j) || !used[i].has(j)) continue;
+          if(pick < 0 || partnerBalances[i] > partnerBalances[pick]) pick = i;
+        }
+        if(pick < 0){                                            // 2) інакше — будь-який з залишком
+          for(let i=0;i<nP;i++){
+            if(partnerBalances[i] <= 0 || !cardAllowedFor(i, j)) continue;
+            if(used[i].size >= capFor(i, Infinity) && !used[i].has(j)) continue; // персональні (Шашенко/Шульга=1)
+            if(pick < 0 || partnerBalances[i] > partnerBalances[pick]) pick = i;
+          }
+        }
+        if(pick < 0) break;
+        const pay = Math.min(managerNeeds[j], partnerBalances[pick]);
+        matrix[pick][j] += pay; managerNeeds[j] -= pay; partnerBalances[pick] -= pay; used[pick].add(j);
+      }
+    }
+  };
   fillPartners();  // основний партнер-орієнтований розподіл (великі шматки на великі картки, ≤4)
   fillGuarantee(); // добиваємо дрібні хвости з мінімумом зайвих карт (надлишок ще відкладено)
+  fillExact();     // точне закриття копійок — усе рахується рівно (0 недоплат, 0 дрібних залишків)
 
   // Надлишок повертаємо у баланси НАПРИКІНЦІ — тому він лишається сконцентрованим на
   // одному найбільшому партнері (а не розтринькується під час добивання). Дефіцит —
