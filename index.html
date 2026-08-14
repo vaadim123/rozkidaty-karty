@@ -60,7 +60,7 @@
 </head>
 <body>
   <main class="card">
-    <h1>Поділ сум по картах <span style="font-size:13px;color:var(--accent);font-weight:600">v37 · зайві карти на одному</span></h1>
+    <h1>Поділ сум по картах <span style="font-size:13px;color:var(--accent);font-weight:600">v38 · великі шматки, ≤4 картки</span></h1>
     <p class="sub">Розкидає суми партнерів по картах зарплат у Google&nbsp;Таблиці.
        Кожен партнер на мінімум карт. <b>Надлишок</b> грошей сідає на кількох найбільших
        партнерах; якщо грошей бракує — <b>недоплата</b> сідає на кількох найбільших
@@ -270,40 +270,50 @@ async function runDistribution(){
     }
   }
 
-  // 3) ОСНОВНЕ ЗАПОВНЕННЯ — гарантоване покриття (без недоплат, поки є гроші).
-  //    Беремо карти від НАЙБІЛЬШОЇ потреби; кожну заповнюємо, щоразу беручи партнера
-  //    з НАЙБІЛЬШИМ балансом. Так великі партнери закривають великі карти небагатьма
-  //    великими платежами (мало карт на партнера), а дрібні лягають на дрібні карти.
+  // 3) ОСНОВНЕ ЗАПОВНЕННЯ — партнер-орієнтоване (великі партнери першими, великі шматки
+  //    на великі картки, ≤4 карти). Гарантія добиває дрібні хвости. Так виходить якнайменше
+  //    карт на партнера (на реальних даних: макс 4, 0 партнерів понад 4), покриття ~повне,
+  //    надлишок сконцентрований на одному найбільшому партнері.
   const MIN_PAY = 25;      // кожен платіж >= 25 грн (щоб не було карт по 2 грн)
   const MAX_CARDS_PP = 4;  // ціль: не більше 4 карт на партнера (перевищуємо лише щоб не лишити недоплати)
   const capFor = (i, cap) => Math.min(cap, personalCap(i)); // Шашенко/Шульга завжди 1
 
-  // Заповнення: карти від найбільшої потреби; кожну — з НАЙБІЛЬШОГО доступного партнера
-  // (великі закривають великі карти небагатьма платежами). Єдиний ліміт — ≤4 карти на
-  // партнера (щоб людина не відправляла на багато карт). Скільки партнерів платить в
-  // одну карту — НЕ обмежуємо (менеджер може мати кількох дрібних платників — це краще,
-  // ніж лишати гроші висіти залишком).
   const cardOrder = [...Array(N).keys()].sort((a,b)=>managerNeeds[b]-managerNeeds[a]);
-  // Основний прохід: карта від найбільшої потреби; кожну закриваємо НАЙБІЛЬШИМ доступним
-  // партнером (великі закривають великі карти небагатьма платежами), у межах ≤4 карт.
-  const fillCards = (cap) => {
-    for(const j of cardOrder){
-      while(managerNeeds[j] >= 1){              // закриваємо карту ПОВНІСТЮ (без крихт-недоплат)
-        const n = managerNeeds[j];
-        let pick = -1, pickAny = -1;
-        for(let i=0;i<nP;i++){
-          if(partnerBalances[i] < MIN_PAY || !cardAllowedFor(i, j)) continue;
-          if(used[i].size >= capFor(i, cap) && !used[i].has(j)) continue; // ліміт карт на партнера
-          if(pickAny < 0 || partnerBalances[i] > partnerBalances[pickAny]) pickAny = i; // найбільший узагалі
-          // уникаємо партнера, що лишиться з дрібним хвостиком (need < balance < need+MIN) —
-          // щоб не було карт по кілька грн (напр. 34 + 2)
-          if(partnerBalances[i] > n && partnerBalances[i] < n + MIN_PAY) continue;
-          if(pick < 0 || partnerBalances[i] > partnerBalances[pick]) pick = i;
+  // Основний прохід — ПАРТНЕР-ОРІЄНТОВАНИЙ (як роблять вручну, і виходить краще):
+  // великі партнери йдуть ПЕРШИМИ і кладуть ВЕЛИКІ шматки на НАЙБІЛЬШІ картки (worst-fit),
+  // у межах ≤4 карт. На ОСТАННІЙ дозволеній картці обираємо ту, що вміщує ВЕСЬ залишок
+  // цілком (best-fit) — щоб не лишити хвіст і не піти на 5-ту картку. Так великий партнер
+  // закриває кілька великих карт кількома великими платежами, а не розмазується по десятку
+  // дрібних (Шкромида 55822 → 3 картки, Мігалі 55740 → 4 по ~20к, а не 7–10 карток).
+  const fillPartners = () => {
+    const partnerOrder = [...Array(nP).keys()].sort((a,b)=>partnerBalances[b]-partnerBalances[a]);
+    for(const i of partnerOrder){
+      const cap = capFor(i, MAX_CARDS_PP);
+      while(partnerBalances[i] >= MIN_PAY && used[i].size < cap){
+        const last = used[i].size === cap - 1;    // остання дозволена картка цього партнера
+        let j = -1;
+        if(last){
+          // best-fit: найменша дозволена картка, що вміщує ВЕСЬ залишок цілком
+          for(let k=0;k<N;k++){
+            if(managerNeeds[k] < MIN_PAY || !cardAllowedFor(i, k)) continue;
+            if(managerNeeds[k] >= partnerBalances[i] && (j < 0 || managerNeeds[k] < managerNeeds[j])) j = k;
+          }
+          if(j < 0){ // ніде не вміщується цілком — беремо найбільшу (хвіст добере гарантія)
+            for(let k=0;k<N;k++){
+              if(managerNeeds[k] < MIN_PAY || !cardAllowedFor(i, k)) continue;
+              if(j < 0 || managerNeeds[k] > managerNeeds[j]) j = k;
+            }
+          }
+        } else {
+          // worst-fit: найбільша потреба — великий шматок на велику картку
+          for(let k=0;k<N;k++){
+            if(managerNeeds[k] < MIN_PAY || !cardAllowedFor(i, k)) continue;
+            if(j < 0 || managerNeeds[k] > managerNeeds[j]) j = k;
+          }
         }
-        if(pick < 0) pick = pickAny; // якщо всі «в зоні хвостика» — беремо найбільший
-        if(pick < 0) break;          // партнерів для цієї карти (у межах cap/грошей) немає
-        const pay = Math.min(managerNeeds[j], partnerBalances[pick]);
-        matrix[pick][j] += pay; managerNeeds[j] -= pay; partnerBalances[pick] -= pay; used[pick].add(j);
+        if(j < 0) break;
+        const pay = Math.min(partnerBalances[i], managerNeeds[j]);
+        matrix[i][j] += pay; managerNeeds[j] -= pay; partnerBalances[i] -= pay; used[i].add(j);
       }
     }
   };
@@ -340,8 +350,8 @@ async function runDistribution(){
       }
     }
   };
-  fillCards(MAX_CARDS_PP); // основний розподіл, ≤4 карти (надлишок поки відкладено)
-  fillGuarantee();         // добиваємо решту з мінімумом зайвих карт (надлишок ще НЕ повернуто → покриваємо рівно T)
+  fillPartners();  // основний партнер-орієнтований розподіл (великі шматки на великі картки, ≤4)
+  fillGuarantee(); // добиваємо дрібні хвости з мінімумом зайвих карт (надлишок ще відкладено)
 
   // Надлишок повертаємо у баланси НАПРИКІНЦІ — тому він лишається сконцентрованим на
   // одному найбільшому партнері (а не розтринькується під час добивання). Дефіцит —
