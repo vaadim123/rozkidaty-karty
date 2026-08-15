@@ -60,7 +60,7 @@
 </head>
 <body>
   <main class="card">
-    <h1>Поділ сум по картах <span style="font-size:13px;color:var(--accent);font-weight:600">v42 · дрібні першими, 0 недоплат</span></h1>
+    <h1>Поділ сум по картах <span style="font-size:13px;color:var(--accent);font-weight:600">v43 · показує дрібні платежі до 20 грн</span></h1>
     <p class="sub">Розкидає суми партнерів по картах зарплат у Google&nbsp;Таблиці.
        Кожен партнер на мінімум карт. <b>Надлишок</b> грошей сідає на кількох найбільших
        партнерах; якщо грошей бракує — <b>недоплата</b> сідає на кількох найбільших
@@ -386,6 +386,14 @@ async function runDistribution(){
   for(let i=0;i<nP;i++){ const u=cardsUsed(i); if(u>MAX_CARDS_PP) over4.push(`${partnerNames[i]}: ${u} карт`); }
   log.push(`===== 🟣 Партнери понад ${MAX_CARDS_PP} картки: ${over4.length} =====`);
   over4.forEach(s=>log.push(s));
+  // Дрібні платежі (менше 20 грн) — показуємо, щоб їх було ВИДНО й можна докинути/поправити вручну
+  const smallPays = [];
+  for(let i=0;i<nP;i++) for(let j=0;j<N;j++){
+    const v = matrix[i][j];
+    if(v > 0.5 && v < MIN_PAY) smallPays.push(`${partnerNames[i]} → ${names[j]} (${cards[j]}): ${Math.round(v)} грн`);
+  }
+  log.push(`===== 💠 Дрібні платежі до 20 грн: ${smallPays.length} =====`);
+  smallPays.forEach(s=>log.push(s));
   log.push(`===== ✅ Усього менеджерів з недоплатою: ${miss} =====`);
   log.push(`===== ✅ Усього партнерів з залишком: ${bal} =====`);
 
