@@ -60,7 +60,7 @@
 </head>
 <body>
   <main class="card">
-    <h1>Поділ сум по картах <span style="font-size:13px;color:var(--accent);font-weight:600">v47 · дрібні до 300 грн — одним платежем (0 недоплат, ≤4 картки)</span></h1>
+    <h1>Поділ сум по картах <span style="font-size:13px;color:var(--accent);font-weight:600">v48 · дрібні до 300 грн одним платежем, без хвостів <20 (0 недоплат, ≤4 картки)</span></h1>
     <p class="sub">Розкидає суми партнерів по картах зарплат у Google&nbsp;Таблиці.
        Кожен партнер на мінімум карт. <b>Надлишок</b> грошей сідає на кількох найбільших
        партнерах; якщо грошей бракує — <b>недоплата</b> сідає на кількох найбільших
@@ -375,7 +375,6 @@ async function runDistribution(){
       if(p1===p2 || j1===j2) return;
       // не чіпаємо персональні правила (Шашенко/Шульга) і монобанк-обмеження
       if(personalCap(p1) !== Infinity || personalCap(p2) !== Infinity) return;
-      if(singleLocked.has(p1) || singleLocked.has(p2)) return; // дрібних (≤300, один платіж) не переділяємо
       if(!cardAllowedFor(p1, j2) || !cardAllowedFor(p2, j1)) return; // не порушуємо дозволені карти
       const A1 = matrix[p1][j1], B2 = matrix[p2][j2]; if(A1 < 1e-9 || B2 < 1e-9) return;
       const A2 = matrix[p1][j2], B1 = matrix[p2][j1];
@@ -386,6 +385,8 @@ async function runDistribution(){
       const ta = (isT(nA1)?1:0)+(isT(nA2)?1:0)+(isT(nB1)?1:0)+(isT(nB2)?1:0);
       const cc1 = cardCnt[p1] + ((occ(nA2)&&!occ(A2))?1:0) - ((!occ(nA1)&&occ(A1))?1:0);
       const cc2 = cardCnt[p2] + ((occ(nB1)&&!occ(B1))?1:0) - ((!occ(nB2)&&occ(B2))?1:0);
+      // дрібних (≤300) не ДРОБИМО: обмін можна лише якщо їхня картка лишається однією (переміщення, не розділення)
+      if((singleLocked.has(p1) && cc1 > 1) || (singleLocked.has(p2) && cc2 > 1)) return;
       const dCost = (ta-tb)*50 + (pen(p1,cc1)-pen(p1,cardCnt[p1])) + (pen(p2,cc2)-pen(p2,cardCnt[p2]));
       if(dCost <= 0 || Math.random() < Math.exp(-dCost/temp)){
         matrix[p1][j1]=nA1; matrix[p1][j2]=nA2; matrix[p2][j1]=nB1; matrix[p2][j2]=nB2;
