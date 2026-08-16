@@ -60,7 +60,7 @@
 </head>
 <body>
   <main class="card">
-    <h1>Поділ сум по картах <span style="font-size:13px;color:var(--accent);font-weight:600">v46 · цілі грн, без «0 грн» (0 недоплат, ≤4 картки)</span></h1>
+    <h1>Поділ сум по картах <span style="font-size:13px;color:var(--accent);font-weight:600">v47 · дрібні до 300 грн — одним платежем (0 недоплат, ≤4 картки)</span></h1>
     <p class="sub">Розкидає суми партнерів по картах зарплат у Google&nbsp;Таблиці.
        Кожен партнер на мінімум карт. <b>Надлишок</b> грошей сідає на кількох найбільших
        партнерах; якщо грошей бракує — <b>недоплата</b> сідає на кількох найбільших
@@ -279,9 +279,10 @@ async function runDistribution(){
   const capFor = (i, cap) => Math.min(cap, personalCap(i)); // Шашенко/Шульга завжди 1
 
   const cardOrder = [...Array(N).keys()].sort((a,b)=>managerNeeds[b]-managerNeeds[a]);
-  const SMALL_MAX = 100;   // «дрібні» партнери (до 100 грн) — одним платежем, першими
+  const SMALL_MAX = 300;   // «дрібні» партнери (до 300 грн) — ОДНИМ платежем, першими (не дробимо)
+  const singleLocked = new Set(); // партнери, чию суму поклали одним платежем — оптимізатор їх не переділяє
 
-  // ФАЗА 1 — ДРІБНІ ПАРТНЕРИ ПЕРШИМИ (до 100 грн): кожен кладе УСЮ свою суму ОДНИМ платежем
+  // ФАЗА 1 — ДРІБНІ ПАРТНЕРИ ПЕРШИМИ (до 300 грн): кожен кладе УСЮ свою суму ОДНИМ платежем
   //   на найменшу картку, що її вміщує (best-fit). Так дрібні йдуть чистим одним платежем і не
   //   стають «копійчаними хвостами», і менеджери не залежать лише від дрібних сум. (Твоя ідея.)
   {
@@ -291,7 +292,13 @@ async function runDistribution(){
     for(const i of smallOrder){
       let j = -1;
       for(let k=0;k<N;k++){ if(managerNeeds[k] < partnerBalances[i] || !cardAllowedFor(i,k)) continue; if(j<0||managerNeeds[k]<managerNeeds[j]) j=k; }
-      if(j < 0) for(let k=0;k<N;k++){ if(managerNeeds[k] < 1 || !cardAllowedFor(i,k)) continue; if(j<0||managerNeeds[k]>managerNeeds[j]) j=k; }
+      if(j >= 0){ // вся сума вмістилась одним платежем — фіксуємо й «замикаємо» від переділу
+        const pay = partnerBalances[i];
+        matrix[i][j]+=pay; managerNeeds[j]-=pay; partnerBalances[i]-=pay; used[i].add(j); singleLocked.add(i);
+        continue;
+      }
+      // жоден менеджер не вміщує всю суму — кладемо на найбільшого (решту доб'ємо пізніше)
+      for(let k=0;k<N;k++){ if(managerNeeds[k] < 1 || !cardAllowedFor(i,k)) continue; if(j<0||managerNeeds[k]>managerNeeds[j]) j=k; }
       if(j < 0) continue;
       const pay = Math.min(partnerBalances[i], managerNeeds[j]);
       matrix[i][j]+=pay; managerNeeds[j]-=pay; partnerBalances[i]-=pay; used[i].add(j);
@@ -368,6 +375,7 @@ async function runDistribution(){
       if(p1===p2 || j1===j2) return;
       // не чіпаємо персональні правила (Шашенко/Шульга) і монобанк-обмеження
       if(personalCap(p1) !== Infinity || personalCap(p2) !== Infinity) return;
+      if(singleLocked.has(p1) || singleLocked.has(p2)) return; // дрібних (≤300, один платіж) не переділяємо
       if(!cardAllowedFor(p1, j2) || !cardAllowedFor(p2, j1)) return; // не порушуємо дозволені карти
       const A1 = matrix[p1][j1], B2 = matrix[p2][j2]; if(A1 < 1e-9 || B2 < 1e-9) return;
       const A2 = matrix[p1][j2], B1 = matrix[p2][j1];
