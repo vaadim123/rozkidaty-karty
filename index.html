@@ -60,7 +60,7 @@
 </head>
 <body>
   <main class="card">
-    <h1>Поділ сум по картах <span style="font-size:13px;color:var(--accent);font-weight:600">v48 · дрібні до 300 грн одним платежем, без хвостів <20 (0 недоплат, ≤4 картки)</span></h1>
+    <h1>Поділ сум по картах <span style="font-size:13px;color:var(--accent);font-weight:600">v49 · мінімум карток (ціль 2, макс 4), дрібні одним платежем, 0 недоплат</span></h1>
     <p class="sub">Розкидає суми партнерів по картах зарплат у Google&nbsp;Таблиці.
        Кожен партнер на мінімум карт. <b>Надлишок</b> грошей сідає на кількох найбільших
        партнерах; якщо грошей бракує — <b>недоплата</b> сідає на кількох найбільших
@@ -355,14 +355,17 @@ async function runDistribution(){
   // 4) РОЗУМНА ОПТИМІЗАЦІЯ (simulated annealing) — не тупий алгоритм, а ПОШУК: тисячі
   //    прямокутних обмінів, що ЗБЕРІГАЮТЬ усі суми (кожен менеджер — рівно потреба, кожен
   //    партнер — рівно свою суму), і покращують розклад: прибирають платежі <20 і зайві
-  //    картки понад 4. Саме так виходить якісно, як роблять вручну. Триває ~12 сек.
+  //    картки понад 4. Саме так виходить якісно, як роблять вручну. Триває ~15 сек.
   setStatus('<span class="spin"></span>Розумний підбір найкращого розкладу…');
   {
     const cardCnt = new Array(nP).fill(0);
     for(let i=0;i<nP;i++) for(let j=0;j<N;j++) if(matrix[i][j] > 1e-9) cardCnt[i]++;
     const isT = v => v > 1e-9 && v < MIN_PAY - 1e-9;   // платіж «дрібний» (<20)
     const occ = v => v > 1e-9;
-    const pen = (i, c) => (personalCap(i) === Infinity && c > MAX_CARDS_PP) ? (c - MAX_CARDS_PP) * 20 : 0;
+    // Вартість карток: до 2 — безкоштовно (ціль — 2 картки), 3-тя і 4-та коштують по 10 (тиснемо
+    //   до меншого), 5+ — по 20 зверху (жорстка ціль ≤4). Так оптимізатор мінімізує кількість карт.
+    const cardCost = c => { if(c <= 2) return 0; if(c <= MAX_CARDS_PP) return (c-2)*10; return (c-2)*10 + (c-MAX_CARDS_PP)*20; };
+    const pen = (i, c) => personalCap(i) === Infinity ? cardCost(c) : 0;
     let cells = [];
     const rebuild = () => { cells = []; for(let i=0;i<nP;i++) for(let j=0;j<N;j++) if(matrix[i][j] > 1e-9) cells.push(i*N + j); };
     rebuild();
@@ -396,7 +399,7 @@ async function runDistribution(){
       }
     };
     const tOpt = Date.now(); let temp = 8;
-    while(Date.now() - tOpt < 12000){ for(let k=0;k<40000;k++) optStep(temp); temp *= 0.99; if(temp < 0.4) temp = 0.4; }
+    while(Date.now() - tOpt < 15000){ for(let k=0;k<40000;k++) optStep(temp); temp *= 0.99; if(temp < 0.4) temp = 0.4; }
     // оновлюємо used за фінальною матрицею
     for(let i=0;i<nP;i++){ used[i] = new Set(); for(let j=0;j<N;j++) if(matrix[i][j] > 1e-9) used[i].add(j); }
   }
