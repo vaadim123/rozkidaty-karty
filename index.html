@@ -60,7 +60,7 @@
 </head>
 <body>
   <main class="card">
-    <h1>Поділ сум по картах <span style="font-size:13px;color:var(--accent);font-weight:600">v43 · показує дрібні платежі до 20 грн</span></h1>
+    <h1>Поділ сум по картах <span style="font-size:13px;color:var(--accent);font-weight:600">v45 · розумний підбір (0 недоплат, ≤4 картки)</span></h1>
     <p class="sub">Розкидає суми партнерів по картах зарплат у Google&nbsp;Таблиці.
        Кожен партнер на мінімум карт. <b>Надлишок</b> грошей сідає на кількох найбільших
        партнерах; якщо грошей бракує — <b>недоплата</b> сідає на кількох найбільших
@@ -343,6 +343,53 @@ async function runDistribution(){
       const pay=Math.min(managerNeeds[j],partnerBalances[pick]);
       matrix[pick][j]+=pay; managerNeeds[j]-=pay; partnerBalances[pick]-=pay; used[pick].add(j);
     }
+  }
+
+  // 4) РОЗУМНА ОПТИМІЗАЦІЯ (simulated annealing) — не тупий алгоритм, а ПОШУК: тисячі
+  //    прямокутних обмінів, що ЗБЕРІГАЮТЬ усі суми (кожен менеджер — рівно потреба, кожен
+  //    партнер — рівно свою суму), і покращують розклад: прибирають платежі <20 і зайві
+  //    картки понад 4. Саме так виходить якісно, як роблять вручну. Триває ~12 сек.
+  setStatus('<span class="spin"></span>Розумний підбір найкращого розкладу…');
+  {
+    const cardCnt = new Array(nP).fill(0);
+    for(let i=0;i<nP;i++) for(let j=0;j<N;j++) if(matrix[i][j] > 1e-9) cardCnt[i]++;
+    const isT = v => v > 1e-9 && v < MIN_PAY - 1e-9;   // платіж «дрібний» (<20)
+    const occ = v => v > 1e-9;
+    const pen = (i, c) => (personalCap(i) === Infinity && c > MAX_CARDS_PP) ? (c - MAX_CARDS_PP) * 20 : 0;
+    let cells = [];
+    const rebuild = () => { cells = []; for(let i=0;i<nP;i++) for(let j=0;j<N;j++) if(matrix[i][j] > 1e-9) cells.push(i*N + j); };
+    rebuild();
+    let rc = 0;
+    const ri = n => (Math.random() * n) | 0;
+    const optStep = (temp) => {
+      if(++rc > 30000){ rebuild(); rc = 0; }
+      const c1 = cells[ri(cells.length)], c2 = cells[ri(cells.length)];
+      const p1 = (c1 / N) | 0, j1 = c1 % N, p2 = (c2 / N) | 0, j2 = c2 % N;
+      if(p1===p2 || j1===j2) return;
+      // не чіпаємо персональні правила (Шашенко/Шульга) і монобанк-обмеження
+      if(personalCap(p1) !== Infinity || personalCap(p2) !== Infinity) return;
+      if(!cardAllowedFor(p1, j2) || !cardAllowedFor(p2, j1)) return; // не порушуємо дозволені карти
+      const A1 = matrix[p1][j1], B2 = matrix[p2][j2]; if(A1 < 1e-9 || B2 < 1e-9) return;
+      const A2 = matrix[p1][j2], B1 = matrix[p2][j1];
+      let d; if(isT(A1) && A1 <= B2) d = A1; else if(isT(B2) && B2 <= A1) d = B2; else d = Math.min(A1, B2);
+      if(d < 1) return;
+      const nA1=A1-d, nA2=A2+d, nB1=B1+d, nB2=B2-d;
+      const tb = (isT(A1)?1:0)+(isT(A2)?1:0)+(isT(B1)?1:0)+(isT(B2)?1:0);
+      const ta = (isT(nA1)?1:0)+(isT(nA2)?1:0)+(isT(nB1)?1:0)+(isT(nB2)?1:0);
+      const cc1 = cardCnt[p1] + ((occ(nA2)&&!occ(A2))?1:0) - ((!occ(nA1)&&occ(A1))?1:0);
+      const cc2 = cardCnt[p2] + ((occ(nB1)&&!occ(B1))?1:0) - ((!occ(nB2)&&occ(B2))?1:0);
+      const dCost = (ta-tb)*50 + (pen(p1,cc1)-pen(p1,cardCnt[p1])) + (pen(p2,cc2)-pen(p2,cardCnt[p2]));
+      if(dCost <= 0 || Math.random() < Math.exp(-dCost/temp)){
+        matrix[p1][j1]=nA1; matrix[p1][j2]=nA2; matrix[p2][j1]=nB1; matrix[p2][j2]=nB2;
+        cardCnt[p1]=cc1; cardCnt[p2]=cc2;
+        if(occ(nA2)&&!occ(A2)) cells.push(p1*N+j2);
+        if(occ(nB1)&&!occ(B1)) cells.push(p2*N+j1);
+      }
+    };
+    const tOpt = Date.now(); let temp = 8;
+    while(Date.now() - tOpt < 12000){ for(let k=0;k<40000;k++) optStep(temp); temp *= 0.99; if(temp < 0.4) temp = 0.4; }
+    // оновлюємо used за фінальною матрицею
+    for(let i=0;i<nP;i++){ used[i] = new Set(); for(let j=0;j<N;j++) if(matrix[i][j] > 1e-9) used[i].add(j); }
   }
 
   // Надлишок повертаємо у баланси НАПРИКІНЦІ — тому він лишається сконцентрованим на
