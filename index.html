@@ -60,7 +60,7 @@
 </head>
 <body>
   <main class="card">
-    <h1>Поділ сум по картах <span style="font-size:13px;color:var(--accent);font-weight:600">v45 · розумний підбір (0 недоплат, ≤4 картки)</span></h1>
+    <h1>Поділ сум по картах <span style="font-size:13px;color:var(--accent);font-weight:600">v46 · цілі грн, без «0 грн» (0 недоплат, ≤4 картки)</span></h1>
     <p class="sub">Розкидає суми партнерів по картах зарплат у Google&nbsp;Таблиці.
        Кожен партнер на мінімум карт. <b>Надлишок</b> грошей сідає на кількох найбільших
        партнерах; якщо грошей бракує — <b>недоплата</b> сідає на кількох найбільших
@@ -189,14 +189,14 @@ async function runDistribution(){
     names.push((F[i] ?? "").toString().trim());
     const g = (G[i] || "").toString().trim();
     cards.push(g ? g : (H[i] ? H[i].toString().trim() : ""));
-    sums.push(num(E[i])); // потреба = справжнє число з E (текстова клітинка → 0, як SUM)
+    sums.push(Math.round(num(E[i]))); // потреба = ціле число грн (без копійок — щоб не було карток «0 грн»)
   }
 
   const nP = Math.max(A.length, B.length);
   const partnerNames = [], partnerAmounts = [];
   for(let i=0;i<nP;i++){
     partnerNames.push((A[i] ?? "").toString().trim());
-    partnerAmounts.push(num(B[i])); // сума = справжнє число з B (текстова клітинка → 0)
+    partnerAmounts.push(Math.round(num(B[i]))); // сума = ціле число грн (без копійок)
   }
   const managerNeeds = sums.slice();
 
