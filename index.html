@@ -60,7 +60,7 @@
 </head>
 <body>
   <main class="card">
-    <h1>Поділ сум по картах <span style="font-size:13px;color:var(--accent);font-weight:600">v44 · дрібні не шредяться, ділиться велике</span></h1>
+    <h1>Поділ сум по картах <span style="font-size:13px;color:var(--accent);font-weight:600">v43 · показує дрібні платежі до 20 грн</span></h1>
     <p class="sub">Розкидає суми партнерів по картах зарплат у Google&nbsp;Таблиці.
        Кожен партнер на мінімум карт. <b>Надлишок</b> грошей сідає на кількох найбільших
        партнерах; якщо грошей бракує — <b>недоплата</b> сідає на кількох найбільших
@@ -279,58 +279,66 @@ async function runDistribution(){
   const capFor = (i, cap) => Math.min(cap, personalCap(i)); // Шашенко/Шульга завжди 1
 
   const cardOrder = [...Array(N).keys()].sort((a,b)=>managerNeeds[b]-managerNeeds[a]);
-  const SMALL_MAX = 2000;  // «дрібний/середній» партнер — платить УСЮ суму одним платежем (не дрібнимо)
+  const SMALL_MAX = 100;   // «дрібні» партнери (до 100 грн) — одним платежем, першими
 
-  // ЗАКРИВАЧ — найбільший партнер: саме на нього звалюється неминуча «дробʼязь» (закриття хвостів
-  // багатьох менеджерів). Так дрібні НЕ шредяться, а ділиться ВЕЛИКА сума (за твоїм правилом).
-  const holder = [...Array(nP).keys()].sort((a,b)=>partnerBalances[b]-partnerBalances[a])[0];
-
-  // ФАЗА 1 — ВЕЛИКІ ПАРТНЕРИ (крім закривача) ЗАКРИВАЮТЬ менеджерів: платять РІВНО потребу
-  //   найбільшого менеджера, якого можуть закрити цілком (few великих платежів), ≤4 карти.
-  {
-    const bigOrder = [...Array(nP).keys()]
-      .filter(i => i!==holder && !ruleFor(i) && partnerBalances[i] >= SMALL_MAX)
-      .sort((a,b)=>partnerBalances[b]-partnerBalances[a]);
-    for(const i of bigOrder){
-      const cap = capFor(i, MAX_CARDS_PP);
-      while(partnerBalances[i] >= MIN_PAY && used[i].size < cap){
-        const last = used[i].size === cap - 1;
-        // найбільший менеджер, якого можна ЗАКРИТИ повністю (need ≤ баланс)
-        let jc=-1; for(let k=0;k<N;k++){ if(managerNeeds[k]<MIN_PAY||managerNeeds[k]>partnerBalances[i]||!cardAllowedFor(i,k)) continue; if(jc<0||managerNeeds[k]>managerNeeds[jc]) jc=k; }
-        if(jc>=0 && !last){ const p=managerNeeds[jc]; matrix[i][jc]+=p; managerNeeds[jc]-=p; partnerBalances[i]-=p; used[i].add(jc); continue; }
-        // остання картка — best-fit, щоб самому спорожнитись цілком; інакше найбільша потреба
-        let jf=-1; for(let k=0;k<N;k++){ if(managerNeeds[k]<partnerBalances[i]||managerNeeds[k]<MIN_PAY||!cardAllowedFor(i,k)) continue; if(jf<0||managerNeeds[k]<managerNeeds[jf]) jf=k; }
-        if(jf>=0){ const p=partnerBalances[i]; matrix[i][jf]+=p; managerNeeds[jf]-=p; partnerBalances[i]-=p; used[i].add(jf); break; }
-        let jb=-1; for(let k=0;k<N;k++){ if(managerNeeds[k]<MIN_PAY||!cardAllowedFor(i,k)) continue; if(jb<0||managerNeeds[k]>managerNeeds[jb]) jb=k; }
-        if(jb<0) break; const p=Math.min(partnerBalances[i],managerNeeds[jb]); matrix[i][jb]+=p; managerNeeds[jb]-=p; partnerBalances[i]-=p; used[i].add(jb);
-      }
-    }
-  }
-
-  // ФАЗА 2 — ДРІБНІ/СЕРЕДНІ ПАРТНЕРИ (до 2000, крім закривача): кожен кладе УСЮ суму ОДНИМ
-  //   платежем на найменшу картку, що її вміщує (best-fit). Ніякого шредингу дрібних на копійки.
+  // ФАЗА 1 — ДРІБНІ ПАРТНЕРИ ПЕРШИМИ (до 100 грн): кожен кладе УСЮ свою суму ОДНИМ платежем
+  //   на найменшу картку, що її вміщує (best-fit). Так дрібні йдуть чистим одним платежем і не
+  //   стають «копійчаними хвостами», і менеджери не залежать лише від дрібних сум. (Твоя ідея.)
   {
     const smallOrder = [...Array(nP).keys()]
-      .filter(i => i!==holder && !ruleFor(i) && partnerBalances[i] >= 1 && partnerBalances[i] < SMALL_MAX)
+      .filter(i => !ruleFor(i) && partnerBalances[i] >= 1 && partnerBalances[i] <= SMALL_MAX)
       .sort((a,b)=>partnerBalances[a]-partnerBalances[b]);
     for(const i of smallOrder){
-      let j=-1; for(let k=0;k<N;k++){ if(managerNeeds[k] < partnerBalances[i] || managerNeeds[k]<MIN_PAY || !cardAllowedFor(i,k)) continue; if(j<0||managerNeeds[k]<managerNeeds[j]) j=k; }
-      if(j<0) for(let k=0;k<N;k++){ if(managerNeeds[k] < 1 || !cardAllowedFor(i,k)) continue; if(j<0||managerNeeds[k]>managerNeeds[j]) j=k; }
-      if(j<0) continue;
+      let j = -1;
+      for(let k=0;k<N;k++){ if(managerNeeds[k] < partnerBalances[i] || !cardAllowedFor(i,k)) continue; if(j<0||managerNeeds[k]<managerNeeds[j]) j=k; }
+      if(j < 0) for(let k=0;k<N;k++){ if(managerNeeds[k] < 1 || !cardAllowedFor(i,k)) continue; if(j<0||managerNeeds[k]>managerNeeds[j]) j=k; }
+      if(j < 0) continue;
       const pay = Math.min(partnerBalances[i], managerNeeds[j]);
       matrix[i][j]+=pay; managerNeeds[j]-=pay; partnerBalances[i]-=pay; used[i].add(j);
     }
   }
 
-  // ФАЗА 3 — ТОЧНЕ ЗАКРИТТЯ (0 недоплат): кожного менеджера добиваємо до нуля. Спершу доплатою
-  //   партнера, що ВЖЕ на картці (без нової картки); інакше — ЗАКРИВАЧЕМ (велика сума ділиться на
-  //   ньому). Дрібних НЕ чіпаємо новими картками. Останній край — будь-хто з залишком.
+  // ФАЗА 2 — ВЕЛИКІ ПАРТНЕРИ: великі шматки на найбільші картки, ≤4 карти, best-fit на останній
+  //   (щоб великий закривав кілька великих карт кількома платежами, а не розмазувався).
+  {
+    const bigOrder = [...Array(nP).keys()].filter(i=>partnerBalances[i] > 0).sort((a,b)=>partnerBalances[b]-partnerBalances[a]);
+    for(const i of bigOrder){
+      const cap = capFor(i, MAX_CARDS_PP);
+      while(partnerBalances[i] >= MIN_PAY && used[i].size < cap){
+        const last = used[i].size === cap - 1;
+        let j = -1;
+        if(last){
+          for(let k=0;k<N;k++){ if(managerNeeds[k] < MIN_PAY || !cardAllowedFor(i,k)) continue; if(managerNeeds[k]>=partnerBalances[i]&&(j<0||managerNeeds[k]<managerNeeds[j])) j=k; }
+          if(j<0) for(let k=0;k<N;k++){ if(managerNeeds[k] < MIN_PAY || !cardAllowedFor(i,k)) continue; if(j<0||managerNeeds[k]>managerNeeds[j]) j=k; }
+        } else {
+          for(let k=0;k<N;k++){ if(managerNeeds[k] < MIN_PAY || !cardAllowedFor(i,k)) continue; if(j<0||managerNeeds[k]>managerNeeds[j]) j=k; }
+        }
+        if(j<0) break;
+        const pay = Math.min(partnerBalances[i], managerNeeds[j]);
+        matrix[i][j]+=pay; managerNeeds[j]-=pay; partnerBalances[i]-=pay; used[i].add(j);
+      }
+    }
+  }
+
+  // ФАЗА 3 — ТОЧНЕ ЗАКРИТТЯ (нульова недоплата): добиваємо КОЖНОГО менеджера до нуля.
+  //   Спершу платежами ≥20 (партнер, що ВЖЕ на картці — доплата без нової; інакше з найменшою
+  //   к-стю карт). Потім рештку-«хвости» (<20) закриваємо будь-ким із залишком — це ті самі
+  //   поодинокі дрібні платежі, без яких неможливо оплатити всіх до гривні.
   for(const j of cardOrder){
+    while(managerNeeds[j] >= MIN_PAY){
+      let pick=-1;
+      for(let i=0;i<nP;i++){ if(partnerBalances[i]<MIN_PAY||!cardAllowedFor(i,j)||!used[i].has(j)) continue; if(pick<0||partnerBalances[i]>partnerBalances[pick]) pick=i; }
+      if(pick<0) for(let i=0;i<nP;i++){ if(partnerBalances[i]<MIN_PAY||!cardAllowedFor(i,j)) continue; if(used[i].size>=capFor(i,Infinity)&&!used[i].has(j)) continue; if(pick<0||used[i].size<used[pick].size||(used[i].size===used[pick].size&&partnerBalances[i]>partnerBalances[pick])) pick=i; }
+      if(pick<0) break;
+      const pay=Math.min(managerNeeds[j],partnerBalances[pick]);
+      matrix[pick][j]+=pay; managerNeeds[j]-=pay; partnerBalances[pick]-=pay; used[pick].add(j);
+    }
+  }
+  for(const j of cardOrder){                              // фінал: закрити копійки будь-ким із залишком
     while(managerNeeds[j] > 0.5){
       let pick=-1;
       for(let i=0;i<nP;i++){ if(partnerBalances[i]<=0||!cardAllowedFor(i,j)||!used[i].has(j)) continue; if(pick<0||partnerBalances[i]>partnerBalances[pick]) pick=i; }
-      if(pick<0 && partnerBalances[holder]>0 && cardAllowedFor(holder,j)) pick=holder;
-      if(pick<0) for(let i=0;i<nP;i++){ if(partnerBalances[i]<=0||!cardAllowedFor(i,j)) continue; if(pick<0||partnerBalances[i]>partnerBalances[pick]) pick=i; }
+      if(pick<0) for(let i=0;i<nP;i++){ if(partnerBalances[i]<=0||!cardAllowedFor(i,j)) continue; if(used[i].size>=capFor(i,Infinity)&&!used[i].has(j)) continue; if(pick<0||partnerBalances[i]>partnerBalances[pick]) pick=i; }
       if(pick<0) break;
       const pay=Math.min(managerNeeds[j],partnerBalances[pick]);
       matrix[pick][j]+=pay; managerNeeds[j]-=pay; partnerBalances[pick]-=pay; used[pick].add(j);
